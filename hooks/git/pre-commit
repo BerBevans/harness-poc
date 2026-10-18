@@ -1,0 +1,21 @@
+#!/bin/sh
+# Blocks commits whose staged snapshot, file paths, identity or branch contain a blocked term.
+. "$(dirname "$0")/_lib.sh"
+load_terms
+
+# Scans the whole staged tree, not just this diff: anything in the repo ends up public.
+hits=$(git grep --cached -I -n -i -F -f "$PATTERNS" | cut -d: -f1,2)
+[ -n "$hits" ] && fail "Blocked term found in staged content at:
+$hits"
+
+git ls-files --cached | matches && fail "A file path contains a blocked term. Find it with:
+  git ls-files | grep -i -F -f \"$TERMS_FILE\"
+(run it in your own terminal, not through Claude - the output contains the term)"
+
+{ git var GIT_AUTHOR_IDENT; git var GIT_COMMITTER_IDENT; } | matches \
+  && fail "Author/committer name or email contains a blocked term (check git config user.name/user.email)."
+
+git symbolic-ref --short HEAD 2>/dev/null | matches && fail "Branch name contains a blocked term."
+
+h=$(local_hook pre-commit) && { rm -f "$PATTERNS"; exec "$h" "$@"; }
+exit 0

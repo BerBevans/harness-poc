@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks commit messages containing a blocked term.
+. "$(dirname "$0")/_lib.sh"
+load_terms
+
+grep -v '^#' "$1" | matches && fail "Commit message contains a blocked term. Your message was kept in $1"
+
+h=$(local_hook commit-msg) && { rm -f "$PATTERNS"; exec "$h" "$@"; }
+exit 0

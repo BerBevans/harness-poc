@@ -1,0 +1,39 @@
+#!/bin/sh
+# Backstop: re-checks every outgoing commit (message, identity, diff), catching anything
+# committed with --no-verify, cherry-picked, rebased in, or made before these hooks existed.
+. "$(dirname "$0")/_lib.sh"
+load_terms
+
+remote=$1
+input=$(cat)
+bad=""
+
+while read -r lref lsha rref rsha; do
+  [ -n "$lsha" ] || continue
+  case $lsha in *[!0]*) ;; *) continue ;; esac   # branch deletion
+  printf '%s\n' "$lref $rref" | matches && fail "Ref name contains a blocked term."
+
+  if case $rsha in *[!0]*) true ;; *) false ;; esac && git cat-file -e "$rsha^{commit}" 2>/dev/null; then
+    commits=$(git rev-list "$rsha..$lsha")
+  else
+    commits=$(git rev-list "$lsha" --not --remotes="$remote")
+  fi
+
+  for c in $commits; do
+    git show --no-color --no-ext-diff --diff-merges=first-parent \
+      --format='%an <%ae>%n%cn <%ce>%n%B' "$c" | matches \
+      && bad="$bad $(git rev-parse --short "$c")"
+  done
+done <<INPUT
+$input
+INPUT
+
+[ -n "$bad" ] && fail "Blocked term found in commit(s):$bad
+(message, author/committer, or diff - including removed lines). Rewrite history before pushing."
+
+if h=$(local_hook pre-push); then
+  rm -f "$PATTERNS"
+  printf '%s\n' "$input" | "$h" "$@"
+  exit $?
+fi
+exit 0
