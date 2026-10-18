@@ -1,0 +1,38 @@
+name: Harness CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hooks:
+    name: Hook tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate the marketplace and plugin
+        run: npx --yes @anthropic-ai/claude-code plugin validate .
+
+      - name: Unit tests
+        working-directory: plugins/factory-harness/hooks
+        run: node --test "test/*.test.mjs"
+
+      - name: Workstation hook tests
+        run: node --test "workstation/claude/*.test.mjs"
+
+      - name: Integration tests against the sample consumer
+        working-directory: plugins/factory-harness/hooks
+        run: node --test "test/integration/*.test.mjs"

@@ -51,7 +51,7 @@ The implementer behaves like a senior developer: it states its interpretation an
 - **First step, before any code:** read the spec and post an issue comment with its interpretation and numbered assumptions, so replies can be as short as "1 and 3 fine, 2 wrong: should be X".
 - **Blocking assumptions** change user-visible behaviour, the data model or persistence, or are hard to reverse. The implementer stops and waits.
 - **Non-blocking assumptions** are everything else. The implementer proceeds and records them in the PR.
-- **A stop partway through** means committing work in progress and a progress note to the branch, so the resumed run doesn't start from scratch.
+- **A stop partway through** means committing work in progress and a progress note in `.factory/progress.md`, so the resumed run doesn't start from scratch.
 - **Answers** are written back into the spec, not left only in the comment thread.
 
 Work resumes only when I re-apply the `ready` label. A reply comment alone doesn't restart it, because a clarification may take several rounds.
@@ -155,11 +155,19 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 
 ## Harness hooks
 
-**Guardrail files are human-owned.** Agents are blocked outright from changing `.editorconfig`, `Directory.Build.props`, `nuget.config`, `Directory.Packages.props`, CI workflows and `.claude/` settings. Changes to them come only through the harness repo, as the one exception to the no-human rule.
+**Guardrail files are human-owned.** Agents may not change `.editorconfig` or `.globalconfig` files at any depth, `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`, `nuget.config`, `global.json`, `.config/dotnet-tools.json`, Stryker configuration, anything under `.github/` or `.claude/`, user-level Claude settings and plugins under `~/.claude`, commands that change Claude's configuration, or architecture test projects (`*.ArchitectureTests`). Changes to them come only through the harness repo, as the one exception to the no-human rule. Enforcement is server-side: CODEOWNERS covers the guardrail paths, and a required CI check fails any PR from an agent App that touches them. The PreToolUse hooks are fast feedback that catches the obvious attempts early, not the enforcement.
 
-**Suppressions in code are blocked too.** That covers `#pragma warning disable`, `[SuppressMessage]` and skipped tests. An agent that thinks one is needed stops and comments on the issue, as it does for a blocking assumption.
+**Suppressions are blocked too,** in code and in project files. In code that means `#pragma warning disable`, `#nullable disable`, `[SuppressMessage]`, `[UnconditionalSuppressMessage]`, `// Stryker disable`, and skipped or explicit-only tests (`Skip =`, `Explicit = true`, `Assert.Skip`, `[Ignore]`). In `.csproj` files it means adding `NoWarn`, `WarningsNotAsErrors` or `TreatWarningsAsErrors`, or `Nullable`, `AnalysisMode`, `AnalysisLevel`, `EnforceCodeStyleInBuild`, `RunAnalyzers*`, `WarningLevel`, `NuGetAudit*` or `CodeAnalysisRuleSet` properties. Generated files (`*.g.cs`, `*.Designer.cs`, `obj/`) are exempt. An agent that thinks one is needed stops and comments on the issue, as it does for a blocking assumption.
 
 **The Stop hook gives fast feedback only:** a build with analyser warnings as errors, unit tests and architecture tests. Mutation testing, holdouts and the PR size check run in CI only.
+
+**Every block says what to do instead.** Headless runs get `FACTORY_ISSUE` from the workflow, and a block tells the agent to comment on that issue and write a progress note. Without it, as in my own sessions, the block tells the agent to stop and explain to me.
+
+**Formatting runs when the agent commits.** A PreToolUse hook on `git commit` runs whitespace and style formatting on the files being committed; if anything changed, it denies the commit and asks the agent to review and re-stage. The build remains the gate: IDE0055 and code-style rules fail it through `EnforceCodeStyleInBuild` and warnings as errors.
+
+**Test projects follow a naming convention** so the Stop hook can tell fast tests from slow ones: `*.UnitTests` and `*.ArchitectureTests` run in the Stop hook; `*.IntegrationTests` and `*.UiTests` run in CI only. A CI check rejects test projects that don't match.
+
+**The progress note is the only way to stop on a red build.** An implementer that stops partway writes `.factory/progress.md` on the branch, with a status (`blocked: awaiting answer` or `paused: work in progress`) and where it got to. The Stop hook allows a stop if there are no changes since the last green run, if the checks pass, or if a valid progress note exists. Otherwise it refuses and tells the agent to fix the failures or write the note and explain the blocker. It never refuses twice in a row, so it can't loop, because CI still catches a red build. A required CI check fails any PR that contains a progress note, so it can pause work but never merge it. A resumed run reads the note and deletes it when it finishes.
 
 ## Analyser package
 
@@ -176,6 +184,8 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 **Mutation testing gates every PR** on changed code only, using Stryker.NET's comparison against the target branch, to build confidence in agent-written tests. Moving it to a nightly run may be considered later.
 
 **The mutation score threshold starts at 75%** on changed code and is raised as results allow.
+
+**CI backstops every hook rule,** since hooks only match text and can be got round. Build settings are asserted by a target in the shared `Directory.Build.targets`, which fails if warnings-as-errors, nullable or `AnalysisMode` are weakened or `NoWarn` grows, however the change was made. Test results fail the run if any test was skipped or not run. A diff scan rejects suppressions in added lines, using the same rule modules as the hooks. A path check rejects agent PRs that touch guardrail files.
 
 ## Constraints
 
@@ -198,4 +208,5 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 - [x] Where the to-do app is hosted? A small VPS behind Cloudflare Tunnel and Access.
 - [x] Which telemetry backend, and where transcripts are stored? Grafana Cloud free tier; transcripts in R2.
 - [x] What each first harness component does? See the hooks, analyser and workflow sections.
+- [ ] Deleted tests: a hook can't tell a deleted test from a refactor. Should a CI check compare test counts against the target branch, with a drop needing my label?
 - [ ] Day 2: stop the line when main is broken, with a fix-the-line exception.

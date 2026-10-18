@@ -1,6 +1,6 @@
-# Harness hooks
+# Workstation guardrails
 
-Human-owned guardrails. Agents can't change the installed copies, so this folder is the source of truth: edit here, run the tests, then reinstall by hand.
+Guardrails for my own machine, not for product repos: they keep the employer's name out of every commit and protect the global git hooks. Agents can't change the installed copies, so this folder is the source of truth: edit here, run the tests, then reinstall by hand. The factory-harness plugin protects `~/.claude` wherever it is installed, so this hook doesn't duplicate that.
 
 ## git/ - global git hooks
 
@@ -16,7 +16,7 @@ Install:
 
 ```sh
 mkdir -p ~/.config/git/hooks
-cp hooks/git/* ~/.config/git/hooks/ && chmod +x ~/.config/git/hooks/*
+cp workstation/git/* ~/.config/git/hooks/ && chmod +x ~/.config/git/hooks/*
 git config --global core.hooksPath "~/.config/git/hooks"
 ```
 
@@ -31,7 +31,7 @@ git config --global core.hooksPath "~/.config/git/hooks"
 
 Every denial tells the agent to stop and explain to the user rather than look for another way round. If the hook can't parse its input it denies (fail closed). In settings it's set to `onFailure: block`, so a missing `node` blocks tool calls rather than letting them through.
 
-Test: `node --test hooks/claude/*.test.mjs`
+Test: `node --test "workstation/claude/*.test.mjs"`
 
 Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settings.json`, adjusting the path for the environment:
 

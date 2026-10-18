@@ -1,4 +1,4 @@
-// Run with: node --test hooks/claude
+// Run with: node --test "workstation/claude/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
