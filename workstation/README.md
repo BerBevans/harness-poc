@@ -33,7 +33,7 @@ Every denial tells the agent to stop and explain to the user rather than look fo
 
 Test: `node --test "workstation/claude/*.test.mjs"`
 
-Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settings.json`, adjusting the path for the environment:
+Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settings.json`. Replace `<user>` with your user name, because the path must be absolute. A path that's left unchanged doesn't exist, and because the hook is set to `onFailure: block`, every tool call is then blocked. Run `echo $HOME` to get the right prefix.
 
 ```json
 "hooks": {
