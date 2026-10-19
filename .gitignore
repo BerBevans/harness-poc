@@ -4,3 +4,6 @@ TestResults/
 # Scratch repos for the hook integration tests. Kept out of %TEMP% because Windows
 # Smart App Control blocks loading freshly built DLLs from there.
 .test-work/
+
+# Local session notes, loaded automatically by Claude Code.
+CLAUDE.local.md
