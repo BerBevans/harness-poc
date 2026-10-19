@@ -187,6 +187,8 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 
 **CI backstops every hook rule,** since hooks only match text and can be got round. Build settings are asserted by a target in the shared `Directory.Build.targets`, which fails if warnings-as-errors, nullable or `AnalysisMode` are weakened or `NoWarn` grows, however the change was made. Test results fail the run if any test was skipped or not run. A diff scan rejects suppressions in added lines, using the same rule modules as the hooks. A path check rejects agent PRs that touch guardrail files.
 
+**Agent runs in CI load the harness plugin with `--plugin-dir`** from a checkout of the harness at a pinned tag. A headless run ignores marketplaces declared in the repository and drops the plugin without any error. The workflow therefore fails any run whose startup event doesn't list the plugin as loaded. Runs authenticate with a `claude setup-token` OAuth token, so usage stays within the subscription, and they don't use `--bare`, because bare mode ignores that token.
+
 ## Constraints
 
 - **Budget:** Claude Pro, not Max, and free tiers only. To fit that, keep tasks small, send routine jobs to a smaller model and run long loops after the usage allowance resets.  I small budget exists for paid tiers but must be justified.
@@ -210,3 +212,4 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 - [x] What each first harness component does? See the hooks, analyser and workflow sections.
 - [ ] Deleted tests: a hook can't tell a deleted test from a refactor. Should a CI check compare test counts against the target branch, with a drop needing my label?
 - [ ] Day 2: stop the line when main is broken, with a fix-the-line exception.
+- [ ] Claude Code plans to make `--bare` the default for `-p`. If that happens without a way to opt out, how do CI runs authenticate within the subscription?
