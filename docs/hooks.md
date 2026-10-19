@@ -66,3 +66,30 @@ claude plugin install factory-harness@factory-harness --scope project
 ```
 
 The harness repo itself doesn't enable the plugin, because the plugin would block the guardrail work done here. The harness is protected by branch protection, CODEOWNERS and review instead.
+
+This works for interactive sessions once the folder is trusted. It does not work in CI; see the next section.
+
+## Running headless in CI
+
+A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarketplaces` from the repository. The project install above therefore doesn't load the plugin in CI, and nothing reports that it's missing. CI loads the plugin from a pinned checkout of the harness instead:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    repository: <owner>/harness-poc
+    ref: v0.1.0
+    path: .harness
+
+- run: >
+    claude -p "$PROMPT"
+    --plugin-dir "$GITHUB_WORKSPACE/.harness/plugins/factory-harness"
+    --output-format stream-json --verbose
+  env:
+    CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+- **Check that the plugin loaded.** The first event in the stream, `system/init`, lists the loaded plugins. The workflow stops the run and fails the job if `factory-harness` isn't in `plugins`, or if `plugin_errors` isn't empty.
+- **Don't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
+- **The token** comes from `claude setup-token`, lasts a year and is stored as the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. CI usage counts against the same subscription allowance as interactive sessions.
+
+Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook.
