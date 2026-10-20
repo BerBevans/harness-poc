@@ -83,12 +83,15 @@ The build-settings and test-results checks run in the product repo's build workf
 ```yaml
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
   actions: read
+  issues: read
+  pull-requests: read
 jobs:
   build:
     name: Build
@@ -101,12 +104,14 @@ jobs:
       - uses: <owner>/harness-poc/actions/build-and-test@v0.1.0
         with:
           solution: <solution>.slnx
+          override-user-ids: <your user ID>
 ```
 
 - **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
 - **It then runs every test project** and fails unless every test passed. A skipped, inconclusive or timed-out test fails, as does a test project that ran no tests. A test project must be named `*.UnitTests`, `*.ArchitectureTests`, `*.IntegrationTests` or `*.UiTests`, and a project named that way must be a test project.
 - **It then measures line and branch coverage** of the product projects, across every test project, with the coverage collector the test SDK includes. It fails if any product project has no coverage at all: a project that no test loads is missing from the report, not counted as 0%.
 - **A push run stores the figure** as the `coverage-baseline` artifact, kept for 90 days. A PR run fails if line or branch coverage is more than 0.1 percentage points below the latest successful push run on its target branch. If there's no figure, or it has expired, the PR fails. Run the workflow by hand on that branch to store a new one.
+- **A coverage drop passes with the `coverage-override` label,** but only if someone in `override-user-ids` added it. The check reads who last added the label from the PR's issue events when it runs, so an agent re-adding a label you removed doesn't count. The build reruns whenever a label is added or removed. Don't add a job-level `if:` to skip label events: GitHub treats a skipped job as passing a required check, so any label would turn a failing build green.
 - **Branches are counted per line, from whichever test project covered most of them,** because the report gives counts, not which branches were taken. That understates coverage slightly, but equally for the PR and the target branch.
 - **Code marked `[ExcludeFromCodeCoverage]` isn't measured,** and nothing rejects the attribute yet.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.

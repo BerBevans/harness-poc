@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { compare, figure, findBaseline, measure, parseCobertura, rate, unmeasuredResult } from '../coverage.mjs';
@@ -130,4 +132,55 @@ test('no baseline is an error, not a pass', async () => {
   await assert.rejects(findBaseline({
     env, event, fetchImpl: fakeRunsApi({ runs: [run(1, 'push')], artifacts: [{ name: 'coverage-baseline', expired: true }] }).fetchImpl,
   }), /or it expired/);
+});
+
+// Runs `coverage.mjs compare` as the action does, against a local server standing in for the
+// GitHub API, which serves the PR's issue events.
+async function runCompare(t, { current, baseline, events = [], overrideUserIds = '1001' }) {
+  const server = http.createServer((request, response) => {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify(request.url.includes('page=1') ? events : []));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'compare-'));
+  t.after(() => { server.close(); fs.rmSync(folder, { recursive: true, force: true }); });
+  const write = (name, value) => { fs.writeFileSync(path.join(folder, name), JSON.stringify(value)); return path.join(folder, name); };
+
+  const child = spawn(process.execPath, [new URL('../coverage.mjs', import.meta.url).pathname, 'compare',
+    write('current.json', current), write('baseline.json', baseline)], {
+    env: {
+      ...process.env,
+      GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
+      GITHUB_REPOSITORY: 'o/r',
+      GITHUB_TOKEN: 't',
+      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7 } }),
+      OVERRIDE_USER_IDS: overrideUserIds,
+    },
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; });
+  const status = await new Promise(resolve => child.on('close', resolve));
+  return { status, output };
+}
+
+const labeled = (login, id) => ({ id: 1, event: 'labeled', actor: { login, id }, label: { name: 'coverage-override' }, created_at: '2026-10-20T10:00:00Z' });
+
+test('a drop passes with the owner\'s coverage-override label, and fails without it', async t => {
+  const drop = { current: fig([79, 100]), baseline: fig([80, 100]) };
+  const approved = await runCompare(t, { ...drop, events: [labeled('owner', 1001)] });
+  assert.equal(approved.status, 0, approved.output);
+  assert.match(approved.output, /::warning::Line coverage fell by 1\.00/);
+  assert.match(approved.output, /Accepted, because owner applied coverage-override\./);
+
+  const agent = await runCompare(t, { ...drop, events: [labeled('factory-agent[bot]', 2002)] });
+  assert.equal(agent.status, 1, agent.output);
+  assert.match(agent.output, /only the repo owner's override counts/);
+
+  assert.equal((await runCompare(t, drop)).status, 1);
+});
+
+test('missing override user IDs fail the step even when coverage held', async t => {
+  const result = await runCompare(t, { current: fig([80, 100]), baseline: fig([80, 100]), overrideUserIds: '' });
+  assert.equal(result.status, 1);
+  assert.match(result.output, /OVERRIDE_USER_IDS is empty/);
 });
