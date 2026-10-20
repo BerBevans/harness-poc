@@ -81,9 +81,14 @@ Both tested against the GitHub API with real PRs. Neither tested yet as a requir
 The build-settings and test-results checks run in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
 
 ```yaml
-on: pull_request
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   build:
     name: Build
@@ -101,8 +106,11 @@ jobs:
 - **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
 - **It then runs every test project** and fails unless every test passed. A skipped, inconclusive or timed-out test fails, as does a test project that ran no tests. A test project must be named `*.UnitTests`, `*.ArchitectureTests`, `*.IntegrationTests` or `*.UiTests`, and a project named that way must be a test project.
 - **It then measures line and branch coverage** of the product projects, across every test project, with the coverage collector the test SDK includes. It fails if any product project has no coverage at all: a project that no test loads is missing from the report, not counted as 0%.
+- **A push run stores the figure** as the `coverage-baseline` artifact, kept for 90 days. A PR run fails if line or branch coverage is more than 0.1 percentage points below the latest successful push run on its target branch. If there's no figure, or it has expired, the PR fails. Run the workflow by hand on that branch to store a new one.
+- **Branches are counted per line, from whichever test project covered most of them,** because the report gives counts, not which branches were taken. That understates coverage slightly, but equally for the PR and the target branch.
+- **Code marked `[ExcludeFromCodeCoverage]` isn't measured,** and nothing rejects the attribute yet.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
-- **A project can still get past it on purpose,** by blocking the import and writing a fake record from its own target. That needs a `<Target>` and `TreatAsLocalProperty` in a project file, which review sees.
+- **Every step runs after the PR's code,** so a PR that sets out to fake its results can do so. It can block the build-settings import and write a fake record, or have a test rewrite the TRX or coverage files. Either needs code that review sees.
 
 ## Running the tests
 

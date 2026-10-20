@@ -1,5 +1,5 @@
 // Builds and tests a copy of samples/consumer with coverage, the way the build-and-test action
-// does, then checks what it measured. Needs the .NET SDK.
+// does, then checks what it measured and the coverage ratchet. Needs the .NET SDK.
 //   node --test "build/test/*.test.mjs"
 
 import { after, before, describe, test } from 'node:test';
@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRecords } from '../../plugins/factory-harness/ci/build-settings-report.mjs';
-import { measure, unmeasuredResult } from '../../plugins/factory-harness/ci/coverage.mjs';
+import { compare, measure, unmeasuredResult } from '../../plugins/factory-harness/ci/coverage.mjs';
 
 const harnessRoot = fileURLToPath(new URL('../../', import.meta.url));
 const targetsFile = path.join(harnessRoot, 'build/BuildSettings.targets');
@@ -60,7 +60,7 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
 
   after(() => fs.rmSync(repo, { recursive: true, force: true }));
 
-  test('measures only product code, across every test', () => {
+  test('measures only product code, and deleting a test fails the ratchet', () => {
     writeFile('tests/Consumer.UnitTests/SignTests.cs', signTests([['Positive', 1, 'positive'], ['NotPositive', 0, 'not positive']]));
     const { figure, unmeasured } = measureCoverage();
     assert.deepEqual(unmeasured, []);
@@ -70,7 +70,12 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
     assert.ok(figure.branches.valid > 0);
 
     writeFile('tests/Consumer.UnitTests/SignTests.cs', signTests([['NotPositive', 0, 'not positive']]));
-    assert.deepEqual(measureCoverage().figure.lines, { covered: 3, valid: 4 });
+    const current = measureCoverage().figure;
+    assert.deepEqual(current.lines, { covered: 3, valid: 4 });
+    const result = compare({ current, baseline: figure });
+    assert.equal(result.passed, false);
+    assert.match(result.lines.join('\n'), /Line coverage fell by 25\.00 percentage points/);
+    assert.match(result.lines.join('\n'), /Branch coverage fell by/);
   });
 
   test('a product project no test loads fails, since it would not count at all', () => {

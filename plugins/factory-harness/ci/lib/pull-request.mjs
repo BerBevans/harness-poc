@@ -41,15 +41,20 @@ export function incompleteListing(files, changedFileCount) {
   };
 }
 
+/** Reads JSON from the GitHub API. Throws on any error status. */
+export async function getJson(url, token, fetchImpl = fetch) {
+  const response = await fetchImpl(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+  });
+  if (!response.ok) throw new Error(`GitHub API returned ${response.status} for ${url}.`);
+  return response.json();
+}
+
 export async function fetchChangedFiles({ apiUrl, repository, number, token, fetchImpl = fetch }) {
   const files = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const url = `${apiUrl}/repos/${repository}/pulls/${number}/files?per_page=${PAGE_SIZE}&page=${page}`;
-    const response = await fetchImpl(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-    });
-    if (!response.ok) throw new Error(`GitHub API returned ${response.status} for ${url}.`);
-    const batch = await response.json();
+    const batch = await getJson(url, token, fetchImpl);
     files.push(...batch);
     if (batch.length < PAGE_SIZE) break;
   }

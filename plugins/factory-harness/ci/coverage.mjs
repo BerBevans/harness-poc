@@ -1,14 +1,25 @@
-// Measures the line and branch coverage of a solution's product projects, across every test
-// project, for the coverage ratchet. Which projects are product projects comes from the
-// build-settings records. Fails if a product project has no coverage at all.
+// The coverage ratchet. A PR's line and branch coverage, across every test project, must not fall
+// more than 0.1 percentage points below the figure from the latest successful build of the target
+// branch. Runs of the build workflow on that branch store their figure as an artifact; a PR run
+// downloads it.
 //
-// Usage: node coverage.mjs measure <build-settings report folder> <test results folder> <figure file>
+// Usage:
+//   node coverage.mjs measure <build-settings report folder> <test results folder> <figure file>
+//   node coverage.mjs find-baseline    (on pull_request; writes run-id to GITHUB_OUTPUT)
+//   node coverage.mjs compare <figure file> <baseline figure file>
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { readRecords } from './build-settings-report.mjs';
-import { annotation, runIfMain } from './lib/pull-request.mjs';
+import { annotation, getJson, runIfMain } from './lib/pull-request.mjs';
 
+export const BASELINE_ARTIFACT = 'coverage-baseline';
+export const ALLOWED_DROP = 0.1;
+
+const FIX =
+  'Coverage fell below the target branch. Add tests for the code this PR changes, and restore any ' +
+  "test you deleted or weakened. Don't exclude code from coverage. If deleting well-covered code " +
+  'lowered the figure, say so in the PR description.';
 const UNMEASURED_FIX =
   "No test loads these projects, so their code isn't measured at all, not even as 0%. Add tests " +
   'that use them; for a project that is hard to unit test, an architecture test that loads it is enough.';
@@ -99,6 +110,49 @@ export function unmeasuredResult(unmeasured) {
   };
 }
 
+/** Decides the ratchet. Returns { passed, lines }. */
+export function compare({ current, baseline }) {
+  const drops = ['lines', 'branches']
+    .map(kind => ({ kind, drop: rate(baseline[kind]) - rate(current[kind]) }))
+    .filter(({ drop }) => drop > ALLOWED_DROP + 1e-9);
+  const summary = [`This PR: ${describe(current)}.`, `Target branch: ${describe(baseline)}.`];
+  if (drops.length === 0) return { passed: true, lines: [...summary, 'Coverage held.'] };
+  return {
+    passed: false,
+    lines: [
+      ...drops.map(({ kind, drop }) => `::error::${kind === 'lines' ? 'Line' : 'Branch'} coverage fell by ${drop.toFixed(2)} percentage points.`),
+      ...summary, FIX,
+    ],
+  };
+}
+
+/**
+ * The latest successful run of this workflow on the PR's target branch, started by a push or by
+ * hand in this repo, and its baseline artifact. Throws if there isn't one, since a missing
+ * baseline must not pass.
+ */
+export async function findBaseline({ env, event, fetchImpl }) {
+  const workflow = /\/\.github\/workflows\/([^@]+)@/.exec(env.GITHUB_WORKFLOW_REF ?? '')?.[1];
+  if (!workflow) throw new Error(`Can't tell the workflow file from GITHUB_WORKFLOW_REF "${env.GITHUB_WORKFLOW_REF}".`);
+  const branch = event.pull_request.base.ref;
+  const repo = `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}`;
+  const get = url => getJson(url, env.GITHUB_TOKEN, fetchImpl);
+
+  const { workflow_runs: runs } = await get(
+    `${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?branch=${encodeURIComponent(branch)}&status=success&per_page=100`);
+  // A fork's PR from its own branch of the same name also has this head branch, so check the event and the repo.
+  const run = runs.find(r => ['push', 'workflow_dispatch'].includes(r.event) && r.head_repository?.full_name === env.GITHUB_REPOSITORY);
+  if (!run) throw new Error(`No successful push run of ${workflow} on ${branch}, so there's no coverage to compare with. Run the workflow on ${branch}.`);
+
+  const { artifacts } = await get(`${repo}/actions/runs/${run.id}/artifacts?name=${BASELINE_ARTIFACT}`);
+  if (!artifacts.some(a => a.name === BASELINE_ARTIFACT && !a.expired)) {
+    throw new Error(`The latest successful run on ${branch} (${run.html_url}) has no ${BASELINE_ARTIFACT} artifact, or it expired. Rerun the workflow on ${branch}.`);
+  }
+  return { runId: run.id, url: run.html_url };
+}
+
+const readFigure = file => JSON.parse(fs.readFileSync(file, 'utf8'));
+
 await runIfMain(import.meta.url, async env => {
   const [mode, ...args] = process.argv.slice(2);
   if (mode === 'measure' && args.length === 3) {
@@ -108,5 +162,11 @@ await runIfMain(import.meta.url, async env => {
     fs.writeFileSync(args[2], JSON.stringify({ ...result, commit: env.GITHUB_SHA }, null, 2));
     return { passed: true, lines: [`Coverage: ${describe(result)}.`] };
   }
-  throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file>');
+  if (mode === 'find-baseline' && args.length === 0) {
+    const { runId, url } = await findBaseline({ env, event: JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')) });
+    fs.appendFileSync(env.GITHUB_OUTPUT, `run-id=${runId}\n`);
+    return { passed: true, lines: [`Comparing with ${url}.`] };
+  }
+  if (mode === 'compare' && args.length === 2) return compare({ current: readFigure(args[0]), baseline: readFigure(args[1]) });
+  throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file> | find-baseline | compare <figure> <baseline>');
 });
