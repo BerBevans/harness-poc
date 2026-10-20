@@ -37,13 +37,17 @@ export const PROJECT_FILE_SUPPRESSIONS = [
 const isCodeFile = path => path.endsWith('.cs') && !isGeneratedCode(path);
 const isProjectFile = path => /\.(csproj|props|targets)$/.test(path);
 
+/** The suppression rules that apply to a file: code rules, project-file rules, or none. */
+export const suppressionRulesFor = normalisedPath =>
+  isCodeFile(normalisedPath) ? CODE_SUPPRESSIONS
+    : isProjectFile(normalisedPath) ? PROJECT_FILE_SUPPRESSIONS
+      : [];
+
 const count = (text, pattern) => (text.match(pattern) ?? []).length;
 
 /** Names of suppressions that appear more often in the added text than in the removed text. */
 export function findNewSuppressions(normalisedPath, addedText, removedText = '') {
-  const rules = isCodeFile(normalisedPath) ? CODE_SUPPRESSIONS
-    : isProjectFile(normalisedPath) ? PROJECT_FILE_SUPPRESSIONS
-      : [];
+  const rules = suppressionRulesFor(normalisedPath);
   return rules.filter(r => count(addedText, r.pattern) > count(removedText, r.pattern)).map(r => r.name);
 }
 
