@@ -37,6 +37,9 @@ jobs:
         working-directory: plugins/factory-harness/ci
         run: node --test "test/*.test.mjs"
 
+      - name: Build settings target tests
+        run: node --test "build/test/*.test.mjs"
+
       - name: Workstation hook tests
         run: node --test "workstation/claude/*.test.mjs"
 

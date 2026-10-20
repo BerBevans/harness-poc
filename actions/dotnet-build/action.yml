@@ -1,0 +1,39 @@
+name: .NET build with build-settings check
+description: >
+  Builds a solution with the harness's BuildSettings.targets imported last, so the build fails if
+  any project's settings are weaker than the factory requires, then fails if any project in the
+  solution wasn't checked. Call it from a workflow triggered by pull_request, never
+  pull_request_target: a build runs the PR's code. The guardrail path check stops a PR changing
+  the workflow that calls this.
+
+inputs:
+  solution:
+    description: Path to the solution file, relative to the repo root.
+    required: true
+  configuration:
+    description: Build configuration.
+    default: Release
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse pull_request_target
+      if: github.event_name == 'pull_request_target'
+      shell: bash
+      run: |
+        echo "::error::The build runs the PR's code, so it must not run on pull_request_target, which has the repo's secrets and a write token. Use pull_request."
+        exit 1
+
+    - name: Build with the build-settings check
+      shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        harness="$GITHUB_ACTION_PATH/../.."
+        report="$RUNNER_TEMP/build-settings-report"
+        rm -rf "$report"
+        dotnet build "$SOLUTION" -c "$CONFIGURATION" \
+          "-p:CustomAfterMicrosoftCommonTargets=$harness/build/BuildSettings.targets" \
+          "-p:BuildSettingsReportDir=$report"
+        node "$harness/plugins/factory-harness/ci/build-settings-report.mjs" "$SOLUTION" "$report"

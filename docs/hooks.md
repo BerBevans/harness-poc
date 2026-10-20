@@ -37,7 +37,7 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 | Gets past the hook | Example | Backstop |
 | --- | --- | --- |
 | Commands assembled at runtime | `f=.editor; f=${f}config; echo x > $f` | CI path check on guardrail files |
-| Scripts written in one step and run in the next | Write `fix.sh` that edits `Directory.Build.props`, then run it | CI path check; build-settings target in `Directory.Build.targets` |
+| Scripts written in one step and run in the next | Write `fix.sh` that edits `Directory.Build.props`, then run it | CI path check; build-settings target |
 | Other languages writing files | `python -c "open('.editorconfig','w')"` | CI path check |
 | Encoded content | A suppression written via base64 | CI diff scan; skipped-test check on test results |
 | Patches | `git apply` of a patch touching a guardrail | CI path check |
@@ -74,9 +74,33 @@ jobs:
 - **The suppression scan** fails a PR that adds more of any suppression than it removes, counted across the whole PR, or that sets a build property in a project file. It fails closed if GitHub leaves out the diff for a C# or project file that gained lines.
 - **Both must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
-- **Make `Guardrail paths` and `Suppression scan` required checks** in the repo's ruleset.
+- **Make `Guardrail paths`, `Suppression scan` and `Build` required checks** in the repo's ruleset.
 
 Both tested against the GitHub API with real PRs. Neither tested yet as a required check in a product repo.
+
+The build-settings check runs in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: <owner>/harness-poc/actions/dotnet-build@v0.1.0
+        with:
+          solution: <solution>.slnx
+```
+
+- **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
+- **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
+- **A project can still get past it on purpose,** by blocking the import and writing a fake record from its own target. That needs a `<Target>` and `TreatAsLocalProperty` in a project file, which review sees.
 
 ## Running the tests
 

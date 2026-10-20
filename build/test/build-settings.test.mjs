@@ -1,0 +1,106 @@
+// Builds a copy of samples/consumer with BuildSettings.targets imported the way CI imports it,
+// then weakens the settings in each way the target must catch. Needs the .NET SDK.
+//   node --test "build/test/*.test.mjs"
+
+import { after, afterEach, before, describe, test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { evaluate, recordedProjects, solutionProjects } from '../../plugins/factory-harness/ci/build-settings-report.mjs';
+
+const harnessRoot = fileURLToPath(new URL('../../', import.meta.url));
+const targetsFile = path.join(harnessRoot, 'build/BuildSettings.targets');
+// Not %TEMP%: Windows Smart App Control blocks loading freshly built DLLs from there.
+const workFolder = process.env.HARNESS_TEST_WORK_DIR || path.join(harnessRoot, '.test-work');
+const projectFile = 'src/Consumer/Consumer.csproj';
+
+let repo;
+let reportDir;
+let originalProject;
+
+const projectPath = () => path.join(repo, projectFile);
+const writeProject = text => fs.writeFileSync(projectPath(), text);
+// Adds properties to the sample's project file, just before its closing tag.
+const addToProject = xml => writeProject(originalProject.replace('</Project>', `${xml}\n</Project>`));
+
+function build(...extraArgs) {
+  fs.rmSync(reportDir, { recursive: true, force: true });
+  const result = spawnSync('dotnet', [
+    'build', path.join(repo, 'Consumer.slnx'), '-nologo', '-v:q',
+    `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`,
+    `-p:BuildSettingsReportDir=${reportDir}`,
+    ...extraArgs,
+  ], { encoding: 'utf8' });
+  const solution = path.join(repo, 'Consumer.slnx');
+  const report = evaluate({ projects: solutionProjects(solution), recorded: recordedProjects(reportDir) });
+  return { status: result.status, output: result.stdout + result.stderr, report };
+}
+
+describe('build settings target', { timeout: 600_000 }, () => {
+  before(() => {
+    fs.mkdirSync(workFolder, { recursive: true });
+    repo = fs.mkdtempSync(path.join(workFolder, 'build-settings-'));
+    reportDir = path.join(repo, '.build-settings-report');
+    fs.cpSync(path.join(harnessRoot, 'samples/consumer'), repo, { recursive: true, filter: source => !/[\\/](bin|obj)$/.test(source) });
+    originalProject = fs.readFileSync(projectPath(), 'utf8');
+  });
+
+  afterEach(() => writeProject(originalProject));
+  after(() => fs.rmSync(repo, { recursive: true, force: true }));
+
+  test('the sample builds and every project is recorded', () => {
+    const { status, output, report } = build();
+    assert.equal(status, 0, output);
+    assert.equal(report.passed, true, report.lines.join('\n'));
+  });
+
+  test('every weakened setting in a project file is reported, not just the first', () => {
+    addToProject(`  <PropertyGroup>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>CS0168</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn),CS1591</NoWarn>
+    <Nullable>disable</Nullable>
+    <AnalysisMode>Default</AnalysisMode>
+    <AnalysisModeSecurity>None</AnalysisModeSecurity>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+    <RunAnalyzers>false</RunAnalyzers>
+  </PropertyGroup>`);
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    for (const expected of [
+      /TreatWarningsAsErrors is 'false'/, /WarningsNotAsErrors is 'CS0168'/, /NoWarn adds CS1591;/,
+      /Nullable is 'disable'/, /AnalysisMode is 'Default'/, /AnalysisMode is lowered for Security\b/,
+      /EnforceCodeStyleInBuild is 'false'/, /Analysers are switched off/,
+    ]) assert.match(output, expected);
+    assert.match(output, /Consumer\.csproj/);
+    assert.doesNotMatch(output, /Consumer\.UnitTests\.csproj\]/);
+  });
+
+  test('a setting weakened in an imported file with any name is caught', () => {
+    fs.writeFileSync(path.join(repo, 'src/Consumer/relaxed.xml'),
+      '<Project><PropertyGroup><Nullable>annotations</Nullable></PropertyGroup></Project>');
+    addToProject('  <Import Project="relaxed.xml" />');
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    assert.match(output, /Nullable is 'annotations'; it must be enable/);
+  });
+
+  test('a setting weakened on the command line is caught', () => {
+    const { status, output } = build('-p:TreatWarningsAsErrors=false');
+    assert.notEqual(status, 0);
+    assert.match(output, /error FH0001: TreatWarningsAsErrors is 'false'/);
+  });
+
+  test('a project that stops the target being imported is missing from the report', () => {
+    writeProject(originalProject
+      .replace('<Project Sdk="Microsoft.NET.Sdk">', '<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="CustomAfterMicrosoftCommonTargets">')
+      .replace('</Project>', '  <PropertyGroup><CustomAfterMicrosoftCommonTargets>none</CustomAfterMicrosoftCommonTargets></PropertyGroup>\n</Project>'));
+    const { status, output, report } = build();
+    assert.equal(status, 0, output);
+    assert.equal(report.passed, false);
+    assert.match(report.lines[0], /Consumer\.csproj::No build-settings record/);
+    assert.equal(report.lines.length, 2);
+  });
+});
