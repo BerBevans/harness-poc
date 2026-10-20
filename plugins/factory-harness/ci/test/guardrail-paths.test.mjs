@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, fetchChangedFiles, guardrailPathsTouched, parseUserIds, run } from '../guardrail-paths.mjs';
+import { evaluate, guardrailPathsTouched, run } from '../guardrail-paths.mjs';
+import { changed, fakeApi } from './helpers.mjs';
 
 const OWNER = { login: 'owner', id: 1001, type: 'User' };
 const AGENT = { login: 'factory-implementer[bot]', id: 2002, type: 'Bot' };
 const DEPENDABOT = { login: 'dependabot[bot]', id: 49699333, type: 'Bot' };
 const STRANGER = { login: 'someone', id: 3003, type: 'User' };
 
-const changed = (...filenames) => filenames.map(filename => ({ filename, status: 'modified' }));
 const check = (author, files) => evaluate({ author, files, changedFileCount: files.length, exemptUserIds: [OWNER.id] });
 
 test('every guardrail path the decisions doc lists is caught', () => {
@@ -82,53 +82,6 @@ test('fails closed when not every changed file was listed', () => {
 test('annotation properties escape characters that would break them', () => {
   const result = check(AGENT, changed('.github/a:b,c.yml'));
   assert.equal(result.lines[0], '::error file=.github/a%3Ab%2Cc.yml::.github/a:b,c.yml is a guardrail file.');
-});
-
-test('user IDs parse from commas or spaces', () => {
-  assert.deepEqual(parseUserIds('1001, 1002 1003'), [1001, 1002, 1003]);
-});
-
-test('an empty exempt list is an error, not an empty list', () => {
-  assert.throws(() => parseUserIds(' '), /EXEMPT_USER_IDS is empty/);
-  assert.throws(() => parseUserIds(undefined), /EXEMPT_USER_IDS is empty/);
-});
-
-test('logins are rejected, because a login can be renamed and reused', () => {
-  assert.throws(() => parseUserIds('1001,owner'), /numeric user IDs, not logins: "owner"/);
-});
-
-// A fake API that serves `files` in pages of 100, and records the URLs it was asked for.
-function fakeApi(files, { status = 200 } = {}) {
-  const urls = [];
-  const fetchImpl = async url => {
-    urls.push(url);
-    const page = Number(new URL(url).searchParams.get('page'));
-    return { ok: status === 200, status, json: async () => files.slice((page - 1) * 100, page * 100) };
-  };
-  return { urls, fetchImpl };
-}
-
-const manyFiles = count => Array.from({ length: count }, (_, i) => ({ filename: `src/f${i}.cs`, status: 'added' }));
-
-test('fetches every page until a short one', async () => {
-  const api = fakeApi(manyFiles(250));
-  const files = await fetchChangedFiles({ apiUrl: 'https://api', repository: 'o/r', number: 7, token: 't', fetchImpl: api.fetchImpl });
-  assert.equal(files.length, 250);
-  assert.equal(api.urls.length, 3);
-  assert.equal(api.urls[0], 'https://api/repos/o/r/pulls/7/files?per_page=100&page=1');
-});
-
-test('stops at the API limit of 3,000 files', async () => {
-  const api = fakeApi(manyFiles(3500));
-  const files = await fetchChangedFiles({ apiUrl: 'https://api', repository: 'o/r', number: 7, token: 't', fetchImpl: api.fetchImpl });
-  assert.equal(files.length, 3000);
-});
-
-test('an API error throws rather than passing', async () => {
-  const api = fakeApi([], { status: 403 });
-  await assert.rejects(
-    fetchChangedFiles({ apiUrl: 'https://api', repository: 'o/r', number: 7, token: 't', fetchImpl: api.fetchImpl }),
-    /GitHub API returned 403/);
 });
 
 const actionsEnv = overrides => ({
