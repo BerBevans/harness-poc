@@ -1,10 +1,11 @@
-name: .NET build with build-settings check
+name: .NET build and test
 description: >
   Builds a solution with the harness's BuildSettings.targets imported last, so the build fails if
   any project's settings are weaker than the factory requires, then fails if any project in the
-  solution wasn't checked. Call it from a workflow triggered by pull_request, never
-  pull_request_target: a build runs the PR's code. The guardrail path check stops a PR changing
-  the workflow that calls this.
+  solution wasn't checked. Then runs every test project, and fails unless every test ran and
+  passed and every test project follows the naming convention. Call it from a workflow triggered
+  by pull_request, never pull_request_target: a build runs the PR's code. The guardrail path check
+  stops a PR changing the workflow that calls this.
 
 inputs:
   solution:
@@ -37,3 +38,15 @@ runs:
           "-p:CustomAfterMicrosoftCommonTargets=$harness/build/BuildSettings.targets" \
           "-p:BuildSettingsReportDir=$report"
         node "$harness/plugins/factory-harness/ci/build-settings-report.mjs" "$SOLUTION" "$report"
+
+    - name: Test, and check that every test ran and passed
+      shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        harness="$GITHUB_ACTION_PATH/../.."
+        results="$RUNNER_TEMP/test-results"
+        rm -rf "$results"
+        dotnet test "$SOLUTION" -c "$CONFIGURATION" --no-build --logger trx --results-directory "$results"
+        node "$harness/plugins/factory-harness/ci/test-results.mjs" "$RUNNER_TEMP/build-settings-report" "$results"

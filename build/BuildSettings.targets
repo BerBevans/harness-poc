@@ -6,7 +6,8 @@
     CI imports this file through CustomAfterMicrosoftCommonTargets, the last import of all, so nothing
     in the repo can redefine the target. Each project it checks writes a record to
     $(BuildSettingsReportDir), and CI fails if any project in the solution has no record. That catches
-    a project that stops this file being imported.
+    a project that stops this file being imported. The record also says whether the project is a test
+    project and names its assembly, so CI can check that every test project's tests ran.
   -->
 
   <PropertyGroup>
@@ -19,7 +20,7 @@
     <WriteLinesToFile
       Condition="'$(BuildSettingsReportDir)' != ''"
       File="$(BuildSettingsReportDir)/$([MSBuild]::StableStringHash($(MSBuildProjectFullPath))).txt"
-      Lines="$(MSBuildProjectFullPath)"
+      Lines="$(MSBuildProjectFullPath);IsTestProject=$(IsTestProject);AssemblyName=$(AssemblyName)"
       Overwrite="true" />
 
     <ItemGroup>
