@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { figure, measure, parseCobertura, rate, unmeasuredResult } from '../coverage.mjs';
+import { compare, figure, findBaseline, measure, parseCobertura, rate, unmeasuredResult } from '../coverage.mjs';
 
 // A Cobertura report shaped like the one the Microsoft collector writes, with each line listed
 // under its method and again under its class.
@@ -68,4 +68,66 @@ test('no coverage reports is an error, not a pass', () => {
 
 test('code with no branches is fully branch-covered', () => {
   assert.equal(rate({ covered: 0, valid: 0 }), 100);
+});
+
+test('holds when coverage is level, higher, or within 0.1 points', () => {
+  assert.equal(compare({ current: fig([80, 100], [5, 10]), baseline: fig([80, 100], [5, 10]) }).passed, true);
+  assert.equal(compare({ current: fig([90, 100]), baseline: fig([80, 100]) }).passed, true);
+  assert.equal(compare({ current: fig([7999, 10000]), baseline: fig([80, 100]) }).passed, true);
+});
+
+test('fails when line or branch coverage falls by more than 0.1 points', () => {
+  const lines = compare({ current: fig([79, 100]), baseline: fig([80, 100]) });
+  assert.equal(lines.passed, false);
+  assert.equal(lines.lines[0], '::error::Line coverage fell by 1.00 percentage points.');
+  assert.match(lines.lines.at(-1), /restore any test you deleted or weakened/);
+
+  const branches = compare({ current: fig([80, 100], [4, 10]), baseline: fig([80, 100], [5, 10]) });
+  assert.deepEqual(branches.lines.slice(0, 3), [
+    '::error::Branch coverage fell by 10.00 percentage points.',
+    'This PR: line 80.00% (80/100), branch 40.00% (4/10).',
+    'Target branch: line 80.00% (80/100), branch 50.00% (5/10).',
+  ]);
+});
+
+// A fake API serving the given runs and artifacts, recording the URLs it was asked for.
+function fakeRunsApi({ runs, artifacts = [{ name: 'coverage-baseline', expired: false }] }) {
+  const urls = [];
+  const fetchImpl = async url => {
+    urls.push(url);
+    const body = url.includes('/artifacts') ? { artifacts } : { workflow_runs: runs };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  return { urls, fetchImpl };
+}
+
+const env = {
+  GITHUB_API_URL: 'https://api',
+  GITHUB_REPOSITORY: 'o/r',
+  GITHUB_TOKEN: 't',
+  GITHUB_WORKFLOW_REF: 'o/r/.github/workflows/build.yml@refs/pull/7/merge',
+};
+const event = { pull_request: { base: { ref: 'main' } } };
+const run = (id, eventName, repo = 'o/r') => ({ id, event: eventName, head_repository: { full_name: repo }, html_url: `run/${id}` });
+
+test("finds the latest successful push run of this workflow on the PR's target branch", async () => {
+  const api = fakeRunsApi({ runs: [run(3, 'pull_request'), run(2, 'push', 'fork/r'), run(1, 'push')] });
+  assert.deepEqual(await findBaseline({ env, event, fetchImpl: api.fetchImpl }), { runId: 1, url: 'run/1' });
+  assert.equal(api.urls[0], 'https://api/repos/o/r/actions/workflows/build.yml/runs?branch=main&status=success&per_page=100');
+  assert.equal(api.urls[1], 'https://api/repos/o/r/actions/runs/1/artifacts?name=coverage-baseline');
+});
+
+test('a run started by hand counts, so an expired baseline can be replaced', async () => {
+  const api = fakeRunsApi({ runs: [run(4, 'workflow_dispatch')] });
+  assert.equal((await findBaseline({ env, event, fetchImpl: api.fetchImpl })).runId, 4);
+});
+
+test('no baseline is an error, not a pass', async () => {
+  await assert.rejects(findBaseline({ env, event, fetchImpl: fakeRunsApi({ runs: [run(3, 'pull_request')] }).fetchImpl }),
+    /No successful push run of build\.yml on main/);
+  await assert.rejects(findBaseline({ env, event, fetchImpl: fakeRunsApi({ runs: [run(1, 'push')], artifacts: [] }).fetchImpl }),
+    /has no coverage-baseline artifact, or it expired/);
+  await assert.rejects(findBaseline({
+    env, event, fetchImpl: fakeRunsApi({ runs: [run(1, 'push')], artifacts: [{ name: 'coverage-baseline', expired: true }] }).fetchImpl,
+  }), /or it expired/);
 });
