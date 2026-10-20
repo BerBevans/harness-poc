@@ -15,7 +15,7 @@ The guard runs five rules in order and denies on the first match:
 - **claude-config:** writes under `~/.claude` (except session data in `projects/`, `plans/` and `todos/`) or to `~/.claude.json`, any mention of `disableAllHooks`, and `claude plugin|config|mcp`. Claude Code applies settings changes mid-session, so this protects the hooks themselves.
 - **guardrail-files:** changes to the guardrail files listed in the decisions doc, by file tool or by a shell command that writes to them, plus `dotnet new` templates that create them, `dotnet add package` and `dotnet tool install`.
 - **secrets:** any access, reads included, to `.env` files, keys and certificates, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gh`, .NET user secrets and git credentials, plus `gh auth token` and `dotnet user-secrets`.
-- **suppressions:** new suppressions in C# and new weakening properties in project files. Added text is compared with removed text, so moving existing code is allowed. Generated code is exempt. `findNewSuppressions` is exported for CI's diff scan.
+- **suppressions:** new suppressions in C# and new weakening properties in project files. Added text is compared with removed text, so moving existing code is allowed. Generated code is exempt. The rule lists are exported for CI's suppression scan.
 - **destructive-git:** force pushes, pushes to `main` or `master`, deleting remote branches, `reset --hard`, `clean -f`, `checkout .`, `restore .`, `branch -D`, history rewriting and `gh pr merge`.
 
 Every denial ends with what to do instead. With `FACTORY_ISSUE` set by the workflow, that is: comment on the issue and write `.factory/progress.md`. Without it: stop and explain to the user.
@@ -45,9 +45,9 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 | Printing secrets from the environment | `printenv` | No secrets in public repos; GitHub push protection |
 | Deleting tests | Removing a test method in a refactor | Coverage ratchet in CI; the reviewer agent checks deleted tests |
 
-## Guardrail path check in CI
+## CI checks for product repos
 
-Product repos call the check from a workflow triggered by `pull_request_target`:
+Product repos call both checks from one workflow triggered by `pull_request_target`:
 
 ```yaml
 on: pull_request_target
@@ -61,14 +61,22 @@ jobs:
       - uses: <owner>/harness-poc/actions/guardrail-paths@v0.1.0
         with:
           exempt-user-ids: <your user ID>
+  suppression-scan:
+    name: Suppression scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <owner>/harness-poc/actions/suppression-scan@v0.1.0
+        with:
+          exempt-user-ids: <your user ID>
 ```
 
-- **It fails any PR that adds, changes, deletes or renames a guardrail file,** unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule.
-- **It must be `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove the check from its own run. The action refuses any other event.
+- **The guardrail path check** fails any PR that adds, changes, deletes or renames a guardrail file, unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule.
+- **The suppression scan** fails a PR that adds more of any suppression than it removes, counted across the whole PR, or that sets a build property in a project file. It fails closed if GitHub leaves out the diff for a C# or project file that gained lines.
+- **Both must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
-- **Make `Guardrail paths` a required check** in the repo's ruleset.
+- **Make `Guardrail paths` and `Suppression scan` required checks** in the repo's ruleset.
 
-Tested against the GitHub API with a real PR. Not yet tested as a required check in a product repo.
+Both tested against the GitHub API with real PRs. Neither tested yet as a required check in a product repo.
 
 ## Running the tests
 

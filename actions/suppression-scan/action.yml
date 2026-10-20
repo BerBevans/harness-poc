@@ -1,0 +1,25 @@
+name: Suppression scan
+description: >
+  Fails a PR that adds suppressions to C# code or weakening properties to project files, unless
+  its author is exempt (the listed people and Dependabot). Uses the same rules as the
+  suppressions hook, counted across the whole PR so that moving code is allowed. Call it from a
+  workflow triggered by pull_request_target; it refuses any other event. It reads the diff from
+  the GitHub API and never checks out or runs the PR's code.
+
+inputs:
+  exempt-user-ids:
+    description: Numeric GitHub user IDs allowed to add suppressions, comma-separated. Logins are rejected.
+    required: true
+  github-token:
+    description: Token used to read the PR's diff. Needs pull-requests read.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Scan the PR's added lines
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/suppression-scan.mjs"
+      env:
+        EXEMPT_USER_IDS: ${{ inputs.exempt-user-ids }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
