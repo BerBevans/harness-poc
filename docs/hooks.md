@@ -74,7 +74,7 @@ This works for interactive sessions once the folder is trusted. It does not work
 A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarketplaces` from the repository. The project install above therefore doesn't load the plugin in CI, and nothing reports that it's missing. CI loads the plugin from a pinned checkout of the harness instead:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with:
     repository: <owner>/harness-poc
     ref: v0.1.0
