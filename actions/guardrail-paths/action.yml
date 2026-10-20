@@ -1,0 +1,24 @@
+name: Guardrail path check
+description: >
+  Fails a PR that changes a guardrail file, unless its author is exempt (the listed people and
+  Dependabot). Call it from a workflow triggered by pull_request_target; it refuses any other
+  event, because on pull_request a PR could change the workflow that runs it. It reads the
+  changed files from the GitHub API and never checks out or runs the PR's code.
+
+inputs:
+  exempt-user-ids:
+    description: Numeric GitHub user IDs allowed to change guardrail files, comma-separated. Logins are rejected.
+    required: true
+  github-token:
+    description: Token used to list the PR's changed files. Needs pull-requests read.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the PR's changed files
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/guardrail-paths.mjs"
+      env:
+        EXEMPT_USER_IDS: ${{ inputs.exempt-user-ids }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}

@@ -20,8 +20,9 @@ const GUARDRAIL_TEMPLATES = new Set([
   'editorconfig', 'globaljson', 'nugetconfig', 'buildprops', 'buildtargets', 'packagesprops', 'tool-manifest',
 ]);
 
+// `home` is optional: CI checks repo-relative paths, where there is no home folder.
 export function isGuardrailPath(normalisedPath, home) {
-  if (isUnder(normalisedPath, `${normalisePath(home)}/.claude`)) return false;
+  if (home && isUnder(normalisedPath, `${normalisePath(home)}/.claude`)) return false;
 
   const parts = segments(normalisedPath);
   const name = parts.at(-1) ?? '';
