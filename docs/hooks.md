@@ -100,6 +100,7 @@ jobs:
 
 - **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
 - **It then runs every test project** and fails unless every test passed. A skipped, inconclusive or timed-out test fails, as does a test project that ran no tests. A test project must be named `*.UnitTests`, `*.ArchitectureTests`, `*.IntegrationTests` or `*.UiTests`, and a project named that way must be a test project.
+- **It then measures line and branch coverage** of the product projects, across every test project, with the coverage collector the test SDK includes. It fails if any product project has no coverage at all: a project that no test loads is missing from the report, not counted as 0%.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
 - **A project can still get past it on purpose,** by blocking the import and writing a fake record from its own target. That needs a `<Target>` and `TreatAsLocalProperty` in a project file, which review sees.
 
