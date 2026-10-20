@@ -70,6 +70,8 @@ Autonomy is earned in phases on measured evidence, not granted up front.
 
 The gate between phases is measured against my review comments, not PRs, over a rolling window. Veto needs 30 comments with no significant misses; merge needs 60, which shows a miss rate of about 5% or less. Precision is tracked alongside.
 
+**Deleted and weakened tests.** The reviewer agent's instructions require it to check every deleted test and every removed or loosened assertion, and to flag any the PR doesn't justify. Coverage catches deletions that lose coverage. The reviewer catches the rest, such as a deleted test whose code another test still covers.
+
 **PR size.** Aim for 200 changed lines; 250 is acceptable and 300 is a hard limit. Above the limit, a PR needs an override label with a justification, for changes that are large but still easy to review. The goal is coherent, reviewable PRs, not one change chopped into pieces to pass the check.
 
 Whitespace-only changes don't count towards the limit. The CI check accepts the override label only when I applied it, not an agent's App.
@@ -185,6 +187,8 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 
 **The mutation score threshold starts at 75%** on changed code and is raised as results allow.
 
+**Coverage is a ratchet, not a target.** A PR's line and branch coverage, measured across every test that runs in CI, must not fall below the latest successful build of the target branch. The allowed drop is 0.1 percentage points, to cover rounding. A deleted or weakened test that loses coverage fails the PR wherever the overall figure stands. Deleting code that is well covered can legitimately lower the figure, so an override label is accepted only when I applied it, as with PR size. A fixed floor may be added later.
+
 **CI backstops every hook rule,** since hooks only match text and can be got round. Build settings are asserted by a target in the shared `Directory.Build.targets`, which fails if warnings-as-errors, nullable or `AnalysisMode` are weakened or `NoWarn` grows, however the change was made. Test results fail the run if any test was skipped or not run. A diff scan rejects suppressions in added lines, using the same rule modules as the hooks. A path check rejects agent PRs that touch guardrail files.
 
 **Agent runs in CI load the harness plugin with `--plugin-dir`** from a checkout of the harness at a pinned tag. A headless run ignores marketplaces declared in the repository and drops the plugin without any error. The workflow therefore fails any run whose startup event doesn't list the plugin as loaded. Runs authenticate with a `claude setup-token` OAuth token, so usage stays within the subscription, and they don't use `--bare`, because bare mode ignores that token.
@@ -210,6 +214,6 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 - [x] Where the to-do app is hosted? A small VPS behind Cloudflare Tunnel and Access.
 - [x] Which telemetry backend, and where transcripts are stored? Grafana Cloud free tier; transcripts in R2.
 - [x] What each first harness component does? See the hooks, analyser and workflow sections.
-- [ ] Deleted tests: a hook can't tell a deleted test from a refactor. Should a CI check compare test counts against the target branch, with a drop needing my label?
+- [x] Deleted tests? No dedicated check. The coverage ratchet and the reviewer agent cover it. A list of test names was rejected because names change and a test can be weakened without being deleted.
 - [ ] Day 2: stop the line when main is broken, with a fix-the-line exception.
 - [ ] Claude Code plans to make `--bare` the default for `-p`. If that happens without a way to opt out, how do CI runs authenticate within the subscription?
