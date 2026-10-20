@@ -1,0 +1,68 @@
+<Project>
+  <!--
+    Fails the build if a project's settings are weaker than the factory requires, however they were
+    changed: in a project file, an imported file of any name, or on the command line.
+
+    CI imports this file through CustomAfterMicrosoftCommonTargets, the last import of all, so nothing
+    in the repo can redefine the target. Each project it checks writes a record to
+    $(BuildSettingsReportDir), and CI fails if any project in the solution has no record. That catches
+    a project that stops this file being imported.
+  -->
+
+  <PropertyGroup>
+    <!-- The SDK's own defaults. Anything else in NoWarn is a suppression. -->
+    <_FactoryAllowedNoWarn>1701;1702</_FactoryAllowedNoWarn>
+    <_FactoryFix>Build settings come only from the shared Directory.Build.props, which is human-owned. Remove the setting; if you believe it's needed, comment on the issue to explain why.</_FactoryFix>
+  </PropertyGroup>
+
+  <Target Name="FactoryAssertBuildSettings" BeforeTargets="CoreCompile">
+    <WriteLinesToFile
+      Condition="'$(BuildSettingsReportDir)' != ''"
+      File="$(BuildSettingsReportDir)/$([MSBuild]::StableStringHash($(MSBuildProjectFullPath))).txt"
+      Lines="$(MSBuildProjectFullPath)"
+      Overwrite="true" />
+
+    <ItemGroup>
+      <_FactoryNoWarn Include="$([MSBuild]::Unescape($(NoWarn.Replace(',', ';'))))" Exclude="$(_FactoryAllowedNoWarn)" />
+      <!-- Each analysis category can be given its own mode, as AnalysisMode<Category>. -->
+      <_FactoryWeakCategory Include="Design" Condition="'$(AnalysisModeDesign)' != '' and '$(AnalysisModeDesign)' != 'All'" />
+      <_FactoryWeakCategory Include="Documentation" Condition="'$(AnalysisModeDocumentation)' != '' and '$(AnalysisModeDocumentation)' != 'All'" />
+      <_FactoryWeakCategory Include="Globalization" Condition="'$(AnalysisModeGlobalization)' != '' and '$(AnalysisModeGlobalization)' != 'All'" />
+      <_FactoryWeakCategory Include="Interoperability" Condition="'$(AnalysisModeInteroperability)' != '' and '$(AnalysisModeInteroperability)' != 'All'" />
+      <_FactoryWeakCategory Include="Maintainability" Condition="'$(AnalysisModeMaintainability)' != '' and '$(AnalysisModeMaintainability)' != 'All'" />
+      <_FactoryWeakCategory Include="Naming" Condition="'$(AnalysisModeNaming)' != '' and '$(AnalysisModeNaming)' != 'All'" />
+      <_FactoryWeakCategory Include="Performance" Condition="'$(AnalysisModePerformance)' != '' and '$(AnalysisModePerformance)' != 'All'" />
+      <_FactoryWeakCategory Include="Reliability" Condition="'$(AnalysisModeReliability)' != '' and '$(AnalysisModeReliability)' != 'All'" />
+      <_FactoryWeakCategory Include="Security" Condition="'$(AnalysisModeSecurity)' != '' and '$(AnalysisModeSecurity)' != 'All'" />
+      <_FactoryWeakCategory Include="SingleFile" Condition="'$(AnalysisModeSingleFile)' != '' and '$(AnalysisModeSingleFile)' != 'All'" />
+      <_FactoryWeakCategory Include="Style" Condition="'$(AnalysisModeStyle)' != '' and '$(AnalysisModeStyle)' != 'All'" />
+      <_FactoryWeakCategory Include="Trimming" Condition="'$(AnalysisModeTrimming)' != '' and '$(AnalysisModeTrimming)' != 'All'" />
+      <_FactoryWeakCategory Include="Usage" Condition="'$(AnalysisModeUsage)' != '' and '$(AnalysisModeUsage)' != 'All'" />
+    </ItemGroup>
+
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(TreatWarningsAsErrors)' != 'true'"
+      Text="TreatWarningsAsErrors is '$(TreatWarningsAsErrors)'; it must be true. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(WarningsNotAsErrors)' != ''"
+      Text="WarningsNotAsErrors is '$(WarningsNotAsErrors)'; it must be empty. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryNoWarn)' != ''"
+      Text="NoWarn adds @(_FactoryNoWarn, ', '); only the SDK defaults ($(_FactoryAllowedNoWarn)) are allowed. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(Nullable)' != 'enable'"
+      Text="Nullable is '$(Nullable)'; it must be enable. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(AnalysisMode)' != 'All'"
+      Text="AnalysisMode is '$(AnalysisMode)'; it must be All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryWeakCategory)' != ''"
+      Text="AnalysisMode is lowered for @(_FactoryWeakCategory, ', '); every category must be All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(EnforceCodeStyleInBuild)' != 'true'"
+      Text="EnforceCodeStyleInBuild is '$(EnforceCodeStyleInBuild)'; it must be true. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
+      Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
+  </Target>
+</Project>
