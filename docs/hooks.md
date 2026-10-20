@@ -78,7 +78,7 @@ jobs:
 
 Both tested against the GitHub API with real PRs. Neither tested yet as a required check in a product repo.
 
-The build-settings check runs in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
+The build-settings and test-results checks run in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
 
 ```yaml
 on: pull_request
@@ -93,12 +93,13 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/dotnet-build@v0.1.0
+      - uses: <owner>/harness-poc/actions/build-and-test@v0.1.0
         with:
           solution: <solution>.slnx
 ```
 
 - **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
+- **It then runs every test project** and fails unless every test passed. A skipped, inconclusive or timed-out test fails, as does a test project that ran no tests. A test project must be named `*.UnitTests`, `*.ArchitectureTests`, `*.IntegrationTests` or `*.UiTests`, and a project named that way must be a test project.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
 - **A project can still get past it on purpose,** by blocking the import and writing a fake record from its own target. That needs a `<Target>` and `TreatAsLocalProperty` in a project file, which review sees.
 
