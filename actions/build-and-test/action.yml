@@ -4,9 +4,10 @@ description: >
   any project's settings are weaker than the factory requires, then fails if any project in the
   solution wasn't checked. Then runs every test project, and fails unless every test ran and
   passed and every test project follows the naming convention. Then measures coverage: on a push,
-  stores it as the branch's baseline, and on a PR, fails if it fell below the target branch's.
-  Call it from a workflow triggered by pull_request and push, never pull_request_target: a build
-  runs the PR's code. The guardrail path check stops a PR changing the workflow that calls this.
+  stores it as the branch's baseline, and on a PR, fails if it fell below the target branch's,
+  unless someone in override-user-ids applied the coverage-override label. Call it from a workflow
+  triggered by pull_request (including labeled and unlabeled) and push, never pull_request_target:
+  a build runs the PR's code. The guardrail path check stops a PR changing the workflow that calls this.
 
 inputs:
   solution:
@@ -15,8 +16,15 @@ inputs:
   configuration:
     description: Build configuration.
     default: Release
+  override-user-ids:
+    description: >
+      Numeric GitHub user IDs whose coverage-override label lets a coverage drop pass. Usually just
+      the repo owner. Not logins, which can be renamed and then taken.
+    required: true
   github-token:
-    description: Token that can read the repo's workflow runs and artifacts (actions read).
+    description: >
+      Token that can read the repo's workflow runs and artifacts (actions read) and the PR's issue
+      events (issues read, pull-requests read).
     default: ${{ github.token }}
   baseline-retention-days:
     description: How long a push run's coverage baseline is kept. A PR fails if it has expired.
@@ -93,6 +101,9 @@ runs:
     - name: Check coverage didn't fall
       if: github.event_name == 'pull_request'
       shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OVERRIDE_USER_IDS: ${{ inputs.override-user-ids }}
       run: |
         node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/coverage.mjs" compare \
           "$RUNNER_TEMP/coverage.json" "$RUNNER_TEMP/coverage-baseline/coverage.json"

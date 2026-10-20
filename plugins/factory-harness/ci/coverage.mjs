@@ -6,15 +6,20 @@
 // Usage:
 //   node coverage.mjs measure <build-settings report folder> <test results folder> <figure file>
 //   node coverage.mjs find-baseline    (on pull_request; writes run-id to GITHUB_OUTPUT)
-//   node coverage.mjs compare <figure file> <baseline figure file>
+//   node coverage.mjs compare <figure file> <baseline figure file>    (on pull_request)
+//
+// Deleting well-covered code can lower the figure legitimately, so a drop passes when the
+// coverage-override label is on the PR and someone in OVERRIDE_USER_IDS applied it.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { readRecords } from './build-settings-report.mjs';
-import { annotation, getJson, runIfMain } from './lib/pull-request.mjs';
+import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
+import { annotation, getJson, parseUserIds, runIfMain } from './lib/pull-request.mjs';
 
 export const BASELINE_ARTIFACT = 'coverage-baseline';
 export const ALLOWED_DROP = 0.1;
+export const OVERRIDE_LABEL = 'coverage-override';
 
 const FIX =
   'Coverage fell below the target branch. Add tests for the code this PR changes, and restore any ' +
@@ -167,6 +172,17 @@ await runIfMain(import.meta.url, async env => {
     fs.appendFileSync(env.GITHUB_OUTPUT, `run-id=${runId}\n`);
     return { passed: true, lines: [`Comparing with ${url}.`] };
   }
-  if (mode === 'compare' && args.length === 2) return compare({ current: readFigure(args[0]), baseline: readFigure(args[1]) });
+  if (mode === 'compare' && args.length === 2) {
+    const allowedUserIds = parseUserIds(env.OVERRIDE_USER_IDS, 'OVERRIDE_USER_IDS');
+    const result = compare({ current: readFigure(args[0]), baseline: readFigure(args[1]) });
+    if (result.passed) return result;
+    const events = await fetchIssueEvents({
+      apiUrl: env.GITHUB_API_URL,
+      repository: env.GITHUB_REPOSITORY,
+      number: JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).pull_request.number,
+      token: env.GITHUB_TOKEN,
+    });
+    return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds });
+  }
   throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file> | find-baseline | compare <figure> <baseline>');
 });

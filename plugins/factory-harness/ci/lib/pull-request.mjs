@@ -16,11 +16,11 @@ const PAGE_SIZE = 100;
 const MAX_PAGES = 30;
 
 /** Parses a comma- or space-separated list of numeric GitHub user IDs. */
-export function parseUserIds(text) {
+export function parseUserIds(text, name = 'EXEMPT_USER_IDS') {
   const parts = String(text ?? '').split(/[\s,]+/).filter(Boolean);
-  if (parts.length === 0) throw new Error('EXEMPT_USER_IDS is empty. Name at least the repo owner.');
+  if (parts.length === 0) throw new Error(`${name} is empty. Name at least the repo owner.`);
   const bad = parts.find(part => !/^\d+$/.test(part));
-  if (bad) throw new Error(`EXEMPT_USER_IDS must hold numeric user IDs, not logins: "${bad}".`);
+  if (bad) throw new Error(`${name} must hold numeric user IDs, not logins: "${bad}".`);
   return parts.map(Number);
 }
 
