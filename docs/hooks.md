@@ -43,7 +43,7 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 | Patches | `git apply` of a patch touching a guardrail | CI path check |
 | Commits made outside Bash and PowerShell | A script that commits | Build fails on IDE0055 |
 | Printing secrets from the environment | `printenv` | No secrets in public repos; GitHub push protection |
-| Deleting tests | Removing a test method in a refactor | Open question in the decisions doc |
+| Deleting tests | Removing a test method in a refactor | Coverage ratchet in CI; the reviewer agent checks deleted tests |
 
 ## Running the tests
 
