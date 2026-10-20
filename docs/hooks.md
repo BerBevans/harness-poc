@@ -45,6 +45,31 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 | Printing secrets from the environment | `printenv` | No secrets in public repos; GitHub push protection |
 | Deleting tests | Removing a test method in a refactor | Coverage ratchet in CI; the reviewer agent checks deleted tests |
 
+## Guardrail path check in CI
+
+Product repos call the check from a workflow triggered by `pull_request_target`:
+
+```yaml
+on: pull_request_target
+permissions:
+  pull-requests: read
+jobs:
+  guardrail-paths:
+    name: Guardrail paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.1.0
+        with:
+          exempt-user-ids: <your user ID>
+```
+
+- **It fails any PR that adds, changes, deletes or renames a guardrail file,** unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule.
+- **It must be `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove the check from its own run. The action refuses any other event.
+- **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
+- **Make `Guardrail paths` a required check** in the repo's ruleset.
+
+Tested against the GitHub API with a real PR. Not yet tested as a required check in a product repo.
+
 ## Running the tests
 
 From `plugins/factory-harness/hooks`:

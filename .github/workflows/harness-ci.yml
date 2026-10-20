@@ -33,6 +33,10 @@ jobs:
         working-directory: plugins/factory-harness/hooks
         run: node --test "test/*.test.mjs"
 
+      - name: CI check tests
+        working-directory: plugins/factory-harness/ci
+        run: node --test "test/*.test.mjs"
+
       - name: Workstation hook tests
         run: node --test "workstation/claude/*.test.mjs"
 
