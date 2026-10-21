@@ -1,0 +1,41 @@
+# CODEOWNERS template for product repos. GitHub ignores this file here because of its name.
+#
+# To use it in a product repo:
+#   1. Copy it to .github/CODEOWNERS.
+#   2. Replace every @harness-owner with the reviewing user, or with a team (@org/team) at work.
+#   3. Add a ruleset on the default branch that requires review from code owners, with the owner
+#      as a bypass actor for pull requests. docs/hooks.md has the settings.
+#
+# Agents can't change guardrail files: the guardrail path check fails their PRs. Owning the
+# guardrails here means Dependabot's PRs and the owner's own PRs need a code owner too. Agents may
+# change the product and architecture docs, but only with the owner's approval.
+#
+# Paths are case-sensitive here, unlike the path check. Each guardrail is listed in the casing
+# .NET tools look for; the path check still catches any other casing in an agent PR.
+#
+# Keep this file in step with isGuardrailPath in plugins/factory-harness/hooks/rules/guardrail-files.mjs.
+# The CI tests fail if a guardrail path isn't owned here.
+
+# Guardrail files, at any depth.
+.editorconfig                   @harness-owner
+*.globalconfig                  @harness-owner
+*.runsettings                   @harness-owner
+Directory.Build.props           @harness-owner
+Directory.Build.targets         @harness-owner
+Directory.Packages.props        @harness-owner
+nuget.config                    @harness-owner
+NuGet.config                    @harness-owner
+NuGet.Config                    @harness-owner
+global.json                     @harness-owner
+**/.config/dotnet-tools.json    @harness-owner
+stryker-config.json             @harness-owner
+stryker-config.yml              @harness-owner
+stryker-config.yaml             @harness-owner
+.github/                        @harness-owner
+.claude/                        @harness-owner
+*.ArchitectureTests/            @harness-owner
+
+# Product and architecture docs. Agents may propose changes; the owner approves them.
+/docs/product.md                @harness-owner
+/ARCHITECTURE.md                @harness-owner
+/docs/adr/                      @harness-owner
