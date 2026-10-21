@@ -8,6 +8,7 @@ The central, human-owned part of a personal software factory: the guardrails eve
 | `plugins/factory-harness/` | The Claude Code plugin: hooks now, skills and the reviewer agent later |
 | `samples/consumer/` | A small .NET solution the hooks are tested against |
 | `workstation/` | Guardrails for my own machine (global git hooks and a user-level Claude hook), installed by hand |
+| `templates/` | Files product repos copy, starting with the CODEOWNERS template |
 | `docs/` | Decisions and how the hooks work |
 
 Install in a product repo:

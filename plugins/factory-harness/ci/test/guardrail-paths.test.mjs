@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluate, guardrailPathsTouched, run } from '../guardrail-paths.mjs';
-import { changed, fakeApi } from './helpers.mjs';
+import { changed, fakeApi, GUARDRAIL_EXAMPLES, ORDINARY_EXAMPLES } from './helpers.mjs';
 
 const OWNER = { login: 'owner', id: 1001, type: 'User' };
 const AGENT = { login: 'factory-implementer[bot]', id: 2002, type: 'Bot' };
@@ -11,19 +11,11 @@ const STRANGER = { login: 'someone', id: 3003, type: 'User' };
 const check = (author, files) => evaluate({ author, files, changedFileCount: files.length, exemptUserIds: [OWNER.id] });
 
 test('every guardrail path the decisions doc lists is caught', () => {
-  const guardrails = [
-    '.editorconfig', 'src/Tasks/.editorconfig', 'src/relaxed.globalconfig',
-    'Directory.Build.props', 'src/Directory.Build.targets', 'Directory.Packages.props',
-    'NuGet.Config', 'global.json', '.config/dotnet-tools.json', 'stryker-config.json',
-    'tests/coverage.runsettings', '.github/workflows/ci.yml', '.github/CODEOWNERS', '.claude/settings.json',
-    'tests/Tasks.ArchitectureTests/LayerTests.cs',
-  ];
-  assert.deepEqual(guardrailPathsTouched(changed(...guardrails)), guardrails);
+  assert.deepEqual(guardrailPathsTouched(changed(...GUARDRAIL_EXAMPLES)), GUARDRAIL_EXAMPLES);
 });
 
 test('ordinary source, test and doc files are not guardrails', () => {
-  const ordinary = ['src/Tasks/TaskList.cs', 'tests/Tasks.UnitTests/TaskListTests.cs', 'README.md', 'docs/github.md'];
-  assert.deepEqual(guardrailPathsTouched(changed(...ordinary)), []);
+  assert.deepEqual(guardrailPathsTouched(changed(...ORDINARY_EXAMPLES)), []);
 });
 
 test('a guardrail file renamed away counts under its old name', () => {

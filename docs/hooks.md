@@ -75,6 +75,7 @@ jobs:
 - **Both must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
 - **Make `Guardrail paths`, `Suppression scan` and `Build` required checks** in the repo's ruleset.
+- **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 
 Both tested against the GitHub API with real PRs. Neither tested yet as a required check in a product repo.
 
@@ -137,7 +138,7 @@ claude plugin marketplace add <owner>/harness-poc#v0.1.0 --scope project
 claude plugin install factory-harness@factory-harness --scope project
 ```
 
-The harness repo itself doesn't enable the plugin, because the plugin would block the guardrail work done here. The harness is protected by branch protection, CODEOWNERS and review instead.
+The harness repo itself doesn't enable the plugin, because the plugin would block the guardrail work done here. The harness is protected by its rulesets and required checks instead. It has no CODEOWNERS file, because I open its PRs and can't approve my own.
 
 This works for interactive sessions once the folder is trusted. It does not work in CI; see the next section.
 
