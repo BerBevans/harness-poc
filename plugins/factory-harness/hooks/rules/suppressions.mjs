@@ -18,6 +18,11 @@ export const CODE_SUPPRESSIONS = [
   { name: 'Skip.If / Skip.When', pattern: /\bSkip\.(If|IfNot|When|Unless)\s*\(/g },
   { name: '[Ignore]', pattern: /[[,]\s*Ignore(Attribute)?\s*[\](,]/g },
   { name: '[Explicit]', pattern: /[[,]\s*Explicit(Attribute)?\s*[\](,]/g },
+  // The attributes the coverage collector skips by default. The bare name is matched, so an alias or
+  // a fully qualified name is caught too.
+  { name: '[ExcludeFromCodeCoverage]', pattern: /\bExcludeFromCodeCoverage(Attribute)?\b/g },
+  { name: '[DebuggerNonUserCode]', pattern: /\bDebuggerNonUserCode(Attribute)?\b/g },
+  { name: '[DebuggerHidden]', pattern: /\bDebuggerHidden(Attribute)?\b/g },
 ];
 
 export const PROJECT_FILE_SUPPRESSIONS = [
@@ -32,6 +37,9 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   { name: 'WarningLevel', pattern: /<\s*WarningLevel\b/gi },
   { name: 'NuGetAudit', pattern: /<\s*NuGetAudit\w*\b/gi },
   { name: 'CodeAnalysisRuleSet', pattern: /<\s*CodeAnalysisRuleSet\b/gi },
+  // Run settings can exclude modules, classes or source files from coverage.
+  { name: 'RunSettingsFilePath', pattern: /<\s*RunSettingsFilePath\b/gi },
+  { name: 'VSTestSetting', pattern: /<\s*VSTestSetting\b/gi },
 ];
 
 const isCodeFile = path => path.endsWith('.cs') && !isGeneratedCode(path);

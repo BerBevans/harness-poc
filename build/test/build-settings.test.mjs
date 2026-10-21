@@ -66,6 +66,8 @@ describe('build settings target', { timeout: 600_000 }, () => {
     <AnalysisModeSecurity>None</AnalysisModeSecurity>
     <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
     <RunAnalyzers>false</RunAnalyzers>
+    <RunSettingsFilePath>coverage.runsettings</RunSettingsFilePath>
+    <VSTestSetting>coverage.runsettings</VSTestSetting>
   </PropertyGroup>`);
     const { status, output } = build();
     assert.notEqual(status, 0);
@@ -73,6 +75,7 @@ describe('build settings target', { timeout: 600_000 }, () => {
       /TreatWarningsAsErrors is 'false'/, /WarningsNotAsErrors is 'CS0168'/, /NoWarn adds CS1591;/,
       /Nullable is 'disable'/, /AnalysisMode is 'Default'/, /AnalysisMode is lowered for Security\b/,
       /EnforceCodeStyleInBuild is 'false'/, /Analysers are switched off/,
+      /RunSettingsFilePath is 'coverage\.runsettings'/, /VSTestSetting is 'coverage\.runsettings'/,
     ]) assert.match(output, expected);
     assert.match(output, /Consumer\.csproj/);
     assert.doesNotMatch(output, /Consumer\.UnitTests\.csproj\]/);
