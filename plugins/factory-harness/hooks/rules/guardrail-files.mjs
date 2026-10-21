@@ -28,6 +28,7 @@ export function isGuardrailPath(normalisedPath, home) {
   const name = parts.at(-1) ?? '';
   return GUARDRAIL_FILE_NAMES.has(name)
     || name.endsWith('.globalconfig')
+    || name.endsWith('.runsettings')
     || /^stryker-config\.(json|ya?ml)$/.test(name)
     || normalisedPath.endsWith('.config/dotnet-tools.json')
     || parts.some(part => GUARDRAIL_FOLDERS.has(part) || part.endsWith('.architecturetests'));

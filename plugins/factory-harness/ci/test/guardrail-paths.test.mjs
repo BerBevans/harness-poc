@@ -15,7 +15,7 @@ test('every guardrail path the decisions doc lists is caught', () => {
     '.editorconfig', 'src/Tasks/.editorconfig', 'src/relaxed.globalconfig',
     'Directory.Build.props', 'src/Directory.Build.targets', 'Directory.Packages.props',
     'NuGet.Config', 'global.json', '.config/dotnet-tools.json', 'stryker-config.json',
-    '.github/workflows/ci.yml', '.github/CODEOWNERS', '.claude/settings.json',
+    'tests/coverage.runsettings', '.github/workflows/ci.yml', '.github/CODEOWNERS', '.claude/settings.json',
     'tests/Tasks.ArchitectureTests/LayerTests.cs',
   ];
   assert.deepEqual(guardrailPathsTouched(changed(...guardrails)), guardrails);

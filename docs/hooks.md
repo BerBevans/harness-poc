@@ -113,9 +113,9 @@ jobs:
 - **A push run stores the figure** as the `coverage-baseline` artifact, kept for 90 days. A PR run fails if line or branch coverage is more than 0.1 percentage points below the latest successful push run on its target branch. If there's no figure, or it has expired, the PR fails. Run the workflow by hand on that branch to store a new one.
 - **A coverage drop passes with the `coverage-override` label,** but only if someone in `override-user-ids` added it. The check reads who last added the label from the PR's issue events when it runs, so an agent re-adding a label you removed doesn't count. The build reruns whenever a label is added or removed. Don't add a job-level `if:` to skip label events: GitHub treats a skipped job as passing a required check, so any label would turn a failing build green.
 - **Branches are counted per line, from whichever test project covered most of them,** because the report gives counts, not which branches were taken. That understates coverage slightly, but equally for the PR and the target branch.
-- **Code marked `[ExcludeFromCodeCoverage]` isn't measured,** and nothing rejects the attribute yet.
+- **Code can't be quietly left out of coverage.** The hook and the diff scan reject the three attributes the collector skips (`[ExcludeFromCodeCoverage]`, `[DebuggerNonUserCode]` and `[DebuggerHidden]`), the target fails a project that sets `RunSettingsFilePath` or `VSTestSetting`, and `.runsettings` files are guardrails.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
-- **Every step runs after the PR's code,** so a PR that sets out to fake its results can do so. It can block the build-settings import and write a fake record, or have a test rewrite the TRX or coverage files. Either needs code that review sees.
+- **Every step runs after the PR's code,** so a PR that sets out to fake its results can do so. It can block the build-settings import and write a fake record, have a test rewrite the TRX or coverage files, or set run settings only when `dotnet test --no-build` runs, so the build-time check doesn't see them. Each needs code that review sees.
 
 ## Running the tests
 

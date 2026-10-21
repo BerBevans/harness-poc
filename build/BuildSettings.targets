@@ -65,5 +65,12 @@
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
       Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
+    <!-- Run settings can exclude code from coverage, so a project may not choose its own. -->
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(RunSettingsFilePath)' != ''"
+      Text="RunSettingsFilePath is '$(RunSettingsFilePath)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(VSTestSetting)' != ''"
+      Text="VSTestSetting is '$(VSTestSetting)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
   </Target>
 </Project>

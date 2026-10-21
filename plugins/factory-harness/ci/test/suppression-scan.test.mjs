@@ -27,7 +27,8 @@ test('a new pragma in C# fails, pointing at its line in the new file', () => {
 test('every C# rule the hook has is applied', () => {
   const added = [
     '+#nullable disable', '+[SuppressMessage("x", "y")]', '+// Stryker disable all', '+[Fact(Skip = "later")]',
-    '+[Test, Explicit]', '+Assert.Skip("no");', '+[Ignore]',
+    '+[Test, Explicit]', '+Assert.Skip("no");', '+[Ignore]', '+[ExcludeFromCodeCoverage]', '+[DebuggerNonUserCode]',
+    '+[DebuggerHidden]',
   ];
   const result = scan(AGENT, [diff('src/A.cs', added)]);
   assert.equal(result.passed, false);
@@ -39,6 +40,12 @@ test('a build setting in a project file fails, without calling it a suppression'
   assert.equal(result.lines[0],
     '::error file=src/Tasks/Tasks.csproj,line=1::Sets NoWarn, a build setting only the shared Directory.Build.props may set.');
   assert.match(result.lines.at(-1), /remove them from project files/);
+});
+
+test('pointing a test project at run settings fails, since they can exclude code from coverage', () => {
+  const result = scan(AGENT, [diff('tests/A.UnitTests/A.UnitTests.csproj', ['+    <RunSettingsFilePath>x.runsettings</RunSettingsFilePath>'])]);
+  assert.equal(result.passed, false);
+  assert.match(result.lines[0], /Sets RunSettingsFilePath/);
 });
 
 test('switching a setting on in a project file also fails, as dotnet new does with Nullable', () => {
