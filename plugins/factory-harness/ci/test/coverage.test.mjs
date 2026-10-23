@@ -45,51 +45,105 @@ test('a line any test project covered counts as covered', () => {
 const record = (name, isTestProject = false) =>
   ({ path: path.resolve(`/r/src/${name}/${name}.csproj`), isTestProject, assemblyName: name });
 
-test('measures the product projects across every report, and names any no report covers', t => {
+// A results folder laid out as run-tests.mjs writes it: one folder per test project.
+function resultsFolder(t, reports) {
   const results = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-'));
   t.after(() => fs.rmSync(results, { recursive: true, force: true }));
-  fs.mkdirSync(path.join(results, 'a'));
-  fs.writeFileSync(path.join(results, 'a', 'x.cobertura.xml'), cobertura({ App: { 'A.cs': [[1, 1], [2, 0]] }, 'App.UnitTests': { 'T.cs': [[1, 1]] } }));
-  fs.writeFileSync(path.join(results, 'y.cobertura.xml'), cobertura({ App: { 'A.cs': [[2, 1]] }, 'App.ArchitectureTests': { 'T.cs': [[1, 1]] } }));
-  const records = [record('App'), record('App.UnitTests', true), record('App.ArchitectureTests', true), record('Orphan')];
+  for (const [testProject, xml] of Object.entries(reports)) {
+    fs.mkdirSync(path.join(results, testProject, 'run-1'), { recursive: true });
+    fs.writeFileSync(path.join(results, testProject, 'run-1', 'x.cobertura.xml'), xml);
+  }
+  return results;
+}
+
+test('core code counts unit tests only, and adapter code integration tests only', t => {
+  const results = resultsFolder(t, {
+    'App.UnitTests': cobertura({ App: { 'A.cs': [[1, 1], [2, 0]] }, 'App.Adapters': { 'D.cs': [[1, 1], [2, 1]] } }),
+    'App.IntegrationTests': cobertura({ App: { 'A.cs': [[1, 1], [2, 1]] }, 'App.Adapters': { 'D.cs': [[1, 1], [2, 0]] } }),
+    'App.ArchitectureTests': cobertura({ App: { 'A.cs': [[2, 1]] } }),
+  });
+  const records = [record('App'), record('App.Adapters'), record('App.UnitTests', true),
+    record('App.IntegrationTests', true), record('App.ArchitectureTests', true)];
 
   const { figure: result, unmeasured } = measure({ records, results });
-  assert.deepEqual(result, fig([2, 2]));
-  assert.deepEqual(unmeasured.map(r => r.assemblyName), ['Orphan']);
+  assert.deepEqual(result, { core: fig([1, 2]), adapters: fig([1, 2]) });
+  assert.deepEqual(unmeasured, []);
+});
+
+test('a repo with no adapter projects has no adapter figure', t => {
+  const results = resultsFolder(t, { 'App.UnitTests': cobertura({ App: { 'A.cs': [[1, 1]] } }) });
+  const { figure: result } = measure({ records: [record('App'), record('App.UnitTests', true)], results });
+  assert.deepEqual(result, { core: fig([1, 1]), adapters: null });
+});
+
+test('a project no test of the right kind loads is named, even if another kind loads it', t => {
+  const results = resultsFolder(t, {
+    'App.UnitTests': cobertura({ App: { 'A.cs': [[1, 1]] }, 'App.Adapters': { 'D.cs': [[1, 1]] } }),
+    'App.ArchitectureTests': cobertura({ App: { 'A.cs': [[1, 0]] }, Orphan: { 'O.cs': [[1, 0]] } }),
+  });
+  const records = [record('App'), record('App.Adapters'), record('Orphan'),
+    record('App.UnitTests', true), record('App.ArchitectureTests', true)];
+
+  const { unmeasured } = measure({ records, results });
+  assert.deepEqual(unmeasured.map(r => r.assemblyName), ['Orphan', 'App.Adapters']);
 
   const failed = unmeasuredResult(unmeasured);
   assert.equal(failed.passed, false);
-  assert.match(failed.lines[0], /Orphan\.csproj::Orphan has no coverage: no test loads it\./);
-  assert.match(failed.lines.at(-1), /an architecture test that loads it is enough/);
+  assert.match(failed.lines[0], /Orphan\.csproj::Orphan has no coverage: no unit test loads it\./);
+  assert.match(failed.lines[1], /App\.Adapters has no coverage: no integration test loads it\./);
+  assert.match(failed.lines.at(-1), /architecture and UI tests count towards neither/);
   assert.equal(unmeasuredResult([]), null);
 });
 
-test('no coverage reports is an error, not a pass', () => {
-  assert.throws(() => measure({ records: [record('App')], results: '/no/such/folder' }), /No coverage reports/);
+test('a test project with no coverage report is an error, not a pass', t => {
+  const results = resultsFolder(t, {});
+  assert.throws(() => measure({ records: [record('App'), record('App.UnitTests', true)], results }),
+    /No coverage report for App\.UnitTests/);
 });
 
 test('code with no branches is fully branch-covered', () => {
   assert.equal(rate({ covered: 0, valid: 0 }), 100);
 });
 
+const both = (core, adapters = null) => ({ core, adapters });
+
 test('holds when coverage is level, higher, or within 0.1 points', () => {
-  assert.equal(compare({ current: fig([80, 100], [5, 10]), baseline: fig([80, 100], [5, 10]) }).passed, true);
-  assert.equal(compare({ current: fig([90, 100]), baseline: fig([80, 100]) }).passed, true);
-  assert.equal(compare({ current: fig([7999, 10000]), baseline: fig([80, 100]) }).passed, true);
+  assert.equal(compare({ current: both(fig([80, 100], [5, 10])), baseline: both(fig([80, 100], [5, 10])) }).passed, true);
+  assert.equal(compare({ current: both(fig([90, 100])), baseline: both(fig([80, 100])) }).passed, true);
+  assert.equal(compare({ current: both(fig([7999, 10000])), baseline: both(fig([80, 100])) }).passed, true);
 });
 
-test('fails when line or branch coverage falls by more than 0.1 points', () => {
-  const lines = compare({ current: fig([79, 100]), baseline: fig([80, 100]) });
-  assert.equal(lines.passed, false);
-  assert.equal(lines.lines[0], '::error::Line coverage fell by 1.00 percentage points.');
-  assert.match(lines.lines.at(-1), /restore any test you deleted or weakened/);
+test('fails when either figure falls by more than 0.1 points', () => {
+  const core = compare({ current: both(fig([79, 100])), baseline: both(fig([80, 100])) });
+  assert.equal(core.passed, false);
+  assert.equal(core.lines[0], '::error::Core code line coverage fell by 1.00 percentage points.');
+  assert.match(core.lines.at(-1), /restore any test you deleted or weakened/);
 
-  const branches = compare({ current: fig([80, 100], [4, 10]), baseline: fig([80, 100], [5, 10]) });
-  assert.deepEqual(branches.lines.slice(0, 3), [
-    '::error::Branch coverage fell by 10.00 percentage points.',
-    'This PR: line 80.00% (80/100), branch 40.00% (4/10).',
-    'Target branch: line 80.00% (80/100), branch 50.00% (5/10).',
+  const adapters = compare({
+    current: both(fig([80, 100]), fig([8, 10], [4, 10])),
+    baseline: both(fig([80, 100]), fig([8, 10], [5, 10])),
+  });
+  assert.deepEqual(adapters.lines.slice(0, 5), [
+    '::error::Adapter code branch coverage fell by 10.00 percentage points.',
+    'Core code, this PR: line 80.00% (80/100), branch 100.00% (0/0).',
+    'Core code, target branch: line 80.00% (80/100), branch 100.00% (0/0).',
+    'Adapter code, this PR: line 80.00% (8/10), branch 40.00% (4/10).',
+    'Adapter code, target branch: line 80.00% (8/10), branch 50.00% (5/10).',
   ]);
+});
+
+test('the first adapter project has nothing to compare with, so it passes', () => {
+  const result = compare({ current: both(fig([80, 100]), fig([1, 10])), baseline: both(fig([80, 100])) });
+  assert.equal(result.passed, true);
+  assert.ok(result.lines.includes("Adapter code, target branch: none yet, so there's nothing to compare with."));
+});
+
+test('removing the last adapter project passes', () => {
+  assert.equal(compare({ current: both(fig([80, 100])), baseline: both(fig([80, 100]), fig([9, 10])) }).passed, true);
+});
+
+test('a baseline in the old single-figure format is an error, not a pass', () => {
+  assert.throws(() => compare({ current: both(fig([80, 100])), baseline: fig([80, 100]) }), /older format/);
 });
 
 // A fake API serving the given runs and artifacts, recording the URLs it was asked for.
@@ -166,10 +220,10 @@ async function runCompare(t, { current, baseline, events = [], overrideUserIds =
 const labeled = (login, id) => ({ id: 1, event: 'labeled', actor: { login, id }, label: { name: 'coverage-override' }, created_at: '2026-10-20T10:00:00Z' });
 
 test('a drop passes with the owner\'s coverage-override label, and fails without it', async t => {
-  const drop = { current: fig([79, 100]), baseline: fig([80, 100]) };
+  const drop = { current: both(fig([79, 100])), baseline: both(fig([80, 100])) };
   const approved = await runCompare(t, { ...drop, events: [labeled('owner', 1001)] });
   assert.equal(approved.status, 0, approved.output);
-  assert.match(approved.output, /::warning::Line coverage fell by 1\.00/);
+  assert.match(approved.output, /::warning::Core code line coverage fell by 1\.00/);
   assert.match(approved.output, /Accepted, because owner applied coverage-override\./);
 
   const agent = await runCompare(t, { ...drop, events: [labeled('factory-agent[bot]', 2002)] });
@@ -180,7 +234,7 @@ test('a drop passes with the owner\'s coverage-override label, and fails without
 });
 
 test('missing override user IDs fail the step even when coverage held', async t => {
-  const result = await runCompare(t, { current: fig([80, 100]), baseline: fig([80, 100]), overrideUserIds: '' });
+  const result = await runCompare(t, { current: both(fig([80, 100])), baseline: both(fig([80, 100])), overrideUserIds: '' });
   assert.equal(result.status, 1);
   assert.match(result.output, /OVERRIDE_USER_IDS is empty/);
 });

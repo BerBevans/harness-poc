@@ -1,7 +1,7 @@
-// The coverage ratchet. A PR's line and branch coverage, across every test project, must not fall
-// more than 0.1 percentage points below the figure from the latest successful build of the target
-// branch. Runs of the build workflow on that branch store their figure as an artifact; a PR run
-// downloads it.
+// The coverage ratchet, on two figures: core code measured from unit tests, and *.Adapters
+// projects measured from integration tests. Each figure's line and branch coverage must not fall
+// more than 0.1 percentage points below the latest successful build of the target branch. Runs of
+// the build workflow on that branch store their figure as an artifact; a PR run downloads it.
 //
 // Usage:
 //   node coverage.mjs measure <build-settings report folder> <test results folder> <figure file>
@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readRecords } from './build-settings-report.mjs';
+import { projectName } from './run-tests.mjs';
 import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
 import { annotation, getJson, parseUserIds, runIfMain } from './lib/pull-request.mjs';
 
@@ -26,8 +27,17 @@ const FIX =
   "test you deleted or weakened. Don't exclude code from coverage. If deleting well-covered code " +
   'lowered the figure, say so in the PR description.';
 const UNMEASURED_FIX =
-  "No test loads these projects, so their code isn't measured at all, not even as 0%. Add tests " +
-  'that use them; for a project that is hard to unit test, an architecture test that loads it is enough.';
+  "No test of the right kind loads these projects, so their code isn't measured at all, not even as 0%. " +
+  'Core code counts only unit tests, and *.Adapters projects count only integration tests; architecture ' +
+  'and UI tests count towards neither. Add tests of the right kind that use these projects.';
+
+// Core code is measured from unit tests, which fake the application's boundaries. The code that
+// talks to those boundaries lives in *.Adapters projects, measured from integration tests.
+const isAdapters = record => /\.Adapters$/.test(projectName(record));
+export const GROUPS = [
+  { key: 'core', label: 'Core code', testSuffix: '.UnitTests', testKind: 'unit test', isMember: record => !isAdapters(record) },
+  { key: 'adapters', label: 'Adapter code', testSuffix: '.IntegrationTests', testKind: 'integration test', isMember: isAdapters },
+];
 
 const attributes = tag => Object.fromEntries([...tag.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, n, v]) => [n, v]));
 
@@ -87,48 +97,85 @@ export const rate = ({ covered, valid }) => (valid === 0 ? 100 : (covered / vali
 const describe = f => `line ${rate(f.lines).toFixed(2)}% (${f.lines.covered}/${f.lines.valid}), ` +
   `branch ${rate(f.branches).toFixed(2)}% (${f.branches.covered}/${f.branches.valid})`;
 
+// The Cobertura reports in one test project's results folder. Throws if there are none, since a
+// test project that ran must have produced one.
+function readReports(results, testRecord) {
+  const folder = path.join(results, projectName(testRecord));
+  const names = fs.existsSync(folder)
+    ? fs.readdirSync(folder, { recursive: true }).filter(name => name.endsWith('.cobertura.xml')) : [];
+  if (names.length === 0) throw new Error(`No coverage report for ${projectName(testRecord)} under ${folder}.`);
+  return names.map(name => fs.readFileSync(path.join(folder, name), 'utf8'));
+}
+
 /**
- * Measures the product projects' coverage from the reports under the results folder. Returns the
- * figure and the product projects no report covers: a project no test loads is left out of the
- * reports, not counted as 0%, so adding an untested project would otherwise leave the figure alone.
+ * Measures each group's coverage from its own kind of test project, as run-tests.mjs lays the
+ * results out. Returns the figure, with null for a group that has no projects, and the projects no
+ * test of the right kind loaded: a project no test loads is left out of the reports, not counted
+ * as 0%, so adding an untested project would otherwise leave the figure alone.
  */
 export function measure({ records, results }) {
-  const productRecords = records.filter(r => !r.isTestProject);
-  const product = new Set(productRecords.map(r => r.assemblyName.toLowerCase()));
-  if (product.size === 0) throw new Error('No build-settings records for product projects, so there is nothing to measure.');
-  const reports = fs.existsSync(results)
-    ? fs.readdirSync(results, { recursive: true }).filter(name => name.endsWith('.cobertura.xml'))
-      .map(name => fs.readFileSync(path.join(results, name), 'utf8')) : [];
-  if (reports.length === 0) throw new Error(`No coverage reports under ${results}.`);
-  const reported = new Set(reports.flatMap(reportedAssemblies));
-  const unmeasured = productRecords.filter(r => !reported.has(r.assemblyName.toLowerCase()));
-  return { figure: figure(reports.flatMap(xml => parseCobertura(xml, product))), unmeasured };
+  const product = records.filter(r => !r.isTestProject);
+  if (product.length === 0) throw new Error('No build-settings records for product projects, so there is nothing to measure.');
+  const figures = {};
+  const unmeasured = [];
+  for (const group of GROUPS) {
+    const members = product.filter(group.isMember);
+    if (members.length === 0) {
+      figures[group.key] = null;
+      continue;
+    }
+    const reports = records.filter(r => r.isTestProject && projectName(r).endsWith(group.testSuffix))
+      .flatMap(r => readReports(results, r));
+    const reported = new Set(reports.flatMap(reportedAssemblies));
+    unmeasured.push(...members.filter(r => !reported.has(r.assemblyName.toLowerCase())).map(r => ({ ...r, group })));
+    const assemblies = new Set(members.map(r => r.assemblyName.toLowerCase()));
+    figures[group.key] = figure(reports.flatMap(xml => parseCobertura(xml, assemblies)));
+  }
+  return { figure: figures, unmeasured };
 }
 
-/** Fails for each product project no test loaded. Returns { passed, lines } or null. */
+/** Fails for each project no test of the right kind loaded. Returns { passed, lines } or null. */
 export function unmeasuredResult(unmeasured) {
   if (unmeasured.length === 0) return null;
-  const name = r => path.basename(r.path).replace(/\.\w+proj$/i, '');
-  return {
-    passed: false,
-    lines: [...unmeasured.map(r => annotation(path.relative(process.cwd(), r.path), `${name(r)} has no coverage: no test loads it.`)), UNMEASURED_FIX],
-  };
-}
-
-/** Decides the ratchet. Returns { passed, lines }. */
-export function compare({ current, baseline }) {
-  const drops = ['lines', 'branches']
-    .map(kind => ({ kind, drop: rate(baseline[kind]) - rate(current[kind]) }))
-    .filter(({ drop }) => drop > ALLOWED_DROP + 1e-9);
-  const summary = [`This PR: ${describe(current)}.`, `Target branch: ${describe(baseline)}.`];
-  if (drops.length === 0) return { passed: true, lines: [...summary, 'Coverage held.'] };
   return {
     passed: false,
     lines: [
-      ...drops.map(({ kind, drop }) => `::error::${kind === 'lines' ? 'Line' : 'Branch'} coverage fell by ${drop.toFixed(2)} percentage points.`),
-      ...summary, FIX,
+      ...unmeasured.map(r => annotation(path.relative(process.cwd(), r.path), `${projectName(r)} has no coverage: no ${r.group.testKind} loads it.`)),
+      UNMEASURED_FIX,
     ],
   };
+}
+
+/** A one-line description of a measured figure, for the log. */
+export const describeFigure = figures => GROUPS.filter(g => figures[g.key])
+  .map(g => `${g.label}: ${describe(figures[g.key])}`).join('; ');
+
+/** Decides the ratchet for each group. Returns { passed, lines }. */
+export function compare({ current, baseline }) {
+  if (!baseline || !('core' in baseline)) {
+    throw new Error("The target branch's coverage figure is in an older format. Rerun the build workflow on the target branch.");
+  }
+  const errors = [];
+  const summary = [];
+  for (const group of GROUPS) {
+    const now = current[group.key];
+    const before = baseline[group.key];
+    if (!now) continue;
+    summary.push(`${group.label}, this PR: ${describe(now)}.`);
+    if (!before) {
+      summary.push(`${group.label}, target branch: none yet, so there's nothing to compare with.`);
+      continue;
+    }
+    summary.push(`${group.label}, target branch: ${describe(before)}.`);
+    for (const kind of ['lines', 'branches']) {
+      const drop = rate(before[kind]) - rate(now[kind]);
+      if (drop > ALLOWED_DROP + 1e-9) {
+        errors.push(`::error::${group.label} ${kind === 'lines' ? 'line' : 'branch'} coverage fell by ${drop.toFixed(2)} percentage points.`);
+      }
+    }
+  }
+  if (errors.length === 0) return { passed: true, lines: [...summary, 'Coverage held.'] };
+  return { passed: false, lines: [...errors, ...summary, FIX] };
 }
 
 /**
@@ -165,7 +212,7 @@ await runIfMain(import.meta.url, async env => {
     const failed = unmeasuredResult(unmeasured);
     if (failed) return failed;
     fs.writeFileSync(args[2], JSON.stringify({ ...result, commit: env.GITHUB_SHA }, null, 2));
-    return { passed: true, lines: [`Coverage: ${describe(result)}.`] };
+    return { passed: true, lines: [`Coverage: ${describeFigure(result)}.`] };
   }
   if (mode === 'find-baseline' && args.length === 0) {
     const { runId, url } = await findBaseline({ env, event: JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')) });

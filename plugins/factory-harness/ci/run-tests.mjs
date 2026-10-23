@@ -1,6 +1,6 @@
 // Runs each test project on its own, with coverage, into a results folder named after the project.
 // One `dotnet test` over the whole solution merges every project's coverage into a single report,
-// so coverage couldn't be traced to the test project that produced it.
+// so the coverage check couldn't tell unit-test coverage from integration-test coverage.
 //
 // Every project runs even after one fails, so a run shows all the failures. Which projects are test
 // projects comes from the build-settings records.
