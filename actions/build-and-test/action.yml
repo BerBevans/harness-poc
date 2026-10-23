@@ -3,7 +3,8 @@ description: >
   Builds a solution with the harness's BuildSettings.targets imported last, so the build fails if
   any project's settings are weaker than the factory requires, then fails if any project in the
   solution wasn't checked. Then runs every test project, and fails unless every test ran and
-  passed and every test project follows the naming convention. Then measures coverage: on a push,
+  passed and every test project follows the naming convention. Then measures coverage as two
+  figures, core code from unit tests and *.Adapters projects from integration tests: on a push,
   stores it as the branch's baseline, and on a PR, fails if it fell below the target branch's,
   unless someone in override-user-ids applied the coverage-override label. Call it from a workflow
   triggered by pull_request (including labeled and unlabeled) and push, never pull_request_target:
@@ -63,9 +64,11 @@ runs:
         harness="$GITHUB_ACTION_PATH/../.."
         results="$RUNNER_TEMP/test-results"
         rm -rf "$results"
-        dotnet test "$SOLUTION" -c "$CONFIGURATION" --no-build --logger trx --results-directory "$results" \
-          --collect "Code Coverage;Format=cobertura"
+        # Each test project runs on its own, so coverage can tell unit tests from integration tests.
+        status=0
+        node "$harness/plugins/factory-harness/ci/run-tests.mjs" "$RUNNER_TEMP/build-settings-report" "$results" "$CONFIGURATION" || status=1
         node "$harness/plugins/factory-harness/ci/test-results.mjs" "$RUNNER_TEMP/build-settings-report" "$results"
+        exit $status
 
     - name: Measure coverage
       shell: bash
