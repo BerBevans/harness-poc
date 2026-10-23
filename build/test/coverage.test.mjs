@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRecords } from '../../plugins/factory-harness/ci/build-settings-report.mjs';
 import { compare, measure, unmeasuredResult } from '../../plugins/factory-harness/ci/coverage.mjs';
+import { runTests } from '../../plugins/factory-harness/ci/run-tests.mjs';
 
 const harnessRoot = fileURLToPath(new URL('../../', import.meta.url));
 const targetsFile = path.join(harnessRoot, 'build/BuildSettings.targets');
@@ -24,7 +25,7 @@ const writeFile = (relative, text) => {
   fs.writeFileSync(path.join(repo, relative), text);
 };
 
-// Builds and tests with coverage as the action does, and returns what was measured.
+// Builds and tests with coverage as the action does, one test project at a time, and returns what was measured.
 function measureCoverage() {
   const reportDir = path.join(repo, '.build-settings-report');
   const resultsDir = path.join(repo, '.test-results');
@@ -33,10 +34,14 @@ function measureCoverage() {
   const built = dotnet('build', 'Consumer.slnx', '-nologo', '-v:q', '-c', 'Release',
     `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`, `-p:BuildSettingsReportDir=${reportDir}`);
   assert.equal(built.status, 0, built.stdout + built.stderr);
-  const tested = dotnet('test', 'Consumer.slnx', '-nologo', '-c', 'Release', '--no-build',
-    '--results-directory', resultsDir, '--collect', 'Code Coverage;Format=cobertura');
-  assert.equal(tested.status, 0, tested.stdout + tested.stderr);
-  return measure({ records: readRecords(reportDir), results: resultsDir });
+  const records = readRecords(reportDir);
+  const outputs = [];
+  const tested = runTests({
+    records, results: resultsDir, configuration: 'Release',
+    runDotnet: args => { const run = dotnet(...args); outputs.push(run.stdout + run.stderr); return run; },
+  });
+  assert.equal(tested.passed, true, outputs.join('\n'));
+  return measure({ records, results: resultsDir });
 }
 
 const signTests = tests => [
