@@ -86,7 +86,7 @@ jobs:
 - **The PR size check** fails a PR that changes more than 300 lines, added plus removed, and warns above 250. Blank lines don't count, and within each hunk a removed and an added line that match once whitespace is stripped cancel out, so reindenting is free. It leaves out `packages.lock.json` and EF Core's `Migrations/*.Designer.cs` and `*ModelSnapshot.cs`, and counts everything else. It fails closed if GitHub leaves out the diff for a text file. The `size-override` label lets an oversized PR pass, but only when someone in `override-user-ids` applied it.
 - **All three must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
-- **Make `Guardrail paths`, `Suppression scan`, `PR size` and `Build` required checks** in the repo's ruleset.
+- **Make `Guardrail paths`, `Suppression scan`, `PR size`, `Build` and `Mutation testing` required checks** in the repo's ruleset.
 - **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 
 The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. None is tested yet as a required check in a product repo.
@@ -118,6 +118,19 @@ jobs:
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
+  mutation-test:
+    name: Mutation testing
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: <owner>/harness-poc/actions/mutation-test@v0.1.0
+        with:
+          solution: <solution>.slnx
+          override-user-ids: <your user ID>
 ```
 
 - **It imports `build/BuildSettings.targets` last,** so the build fails for any project whose settings are weaker than the decisions doc requires, wherever the change was made. It then fails if any project in the solution has no record from the target, which catches a project that blocks the import.
@@ -128,6 +141,8 @@ jobs:
 - **Branches are counted per line, from whichever test project of the right kind covered most of them,** because the report gives counts, not which branches were taken. That understates coverage slightly, but equally for the PR and the target branch.
 - **Code can't be quietly left out of coverage.** The hook and the diff scan reject the three attributes the collector skips (`[ExcludeFromCodeCoverage]`, `[DebuggerNonUserCode]` and `[DebuggerHidden]`), the target fails a project that sets `RunSettingsFilePath` or `VSTestSetting`, and `.runsettings` files are guardrails.
 - **It must not run on `pull_request_target`,** which would run the PR's code with the repo's secrets. It's safe on `pull_request` because the guardrail path check fails any PR that changes the workflow. The action refuses `pull_request_target`.
+- **Mutation testing runs Stryker.NET 5.0.0 on PRs only,** as its own job, so it runs alongside the build. It installs Stryker into a folder of its own and gives it an empty config file, so the product's tool manifest and any `stryker-config.json` are ignored. It mutates every changed `.cs` file in a core project as a whole file, and every core project that a changed or deleted unit test file's project references. It doesn't use Stryker's `--since`, which ignores test changes, so a PR that only weakens an assertion would pass. Each core project is mutated once, with the `*.UnitTests` projects that reference it directly. Stryker can't mutate a project that test projects reach only through another project, so the check fails such a project and asks for a direct reference. `*.Adapters` projects and integration tests are left out.
+- **The mutation score is Killed and Timeout mutants over those plus Survived and NoCoverage,** across every file mutated, and below 75% the check fails with an annotation on each missed mutant. Compile errors, runtime errors and ignored mutants don't count. A PR with no mutants passes. A Stryker failure, a missing report, a mutant status the check doesn't know, or a chosen file Stryker left out fails it. The `mutation-override` label lets a low score pass, on the same terms as `coverage-override`. It doesn't excuse a project that can't be mutated. The job-level `if:` is safe because it skips on push, not on label events.
 - **Every step runs after the PR's code,** so a PR that sets out to fake its results can do so. It can block the build-settings import and write a fake record, have a test rewrite the TRX or coverage files, or set run settings only when `dotnet test --no-build` runs, so the build-time check doesn't see them. Each needs code that review sees.
 
 ## Running the tests

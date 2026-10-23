@@ -1,0 +1,54 @@
+name: Mutation testing
+description: >
+  Builds the solution with the harness's build-settings records, then runs Stryker.NET at a pinned
+  version on the core code a PR touches: every changed file in a core project, plus every core
+  project a changed unit test project references. Only unit tests run, and *.Adapters projects
+  aren't mutated. Fails below a 75% mutation score unless someone in override-user-ids applied the
+  mutation-override label. Ignores any Stryker configuration in the repo. Call it from a workflow
+  triggered by pull_request (including labeled and unlabeled), never pull_request_target: it runs
+  the PR's code. The guardrail path check stops a PR changing the workflow that calls this.
+
+inputs:
+  solution:
+    description: Path to the solution file, relative to the repo root.
+    required: true
+  override-user-ids:
+    description: >
+      Numeric GitHub user IDs whose mutation-override label lets a low score pass. Usually just the
+      repo owner. Not logins, which can be renamed and then taken.
+    required: true
+  github-token:
+    description: Token that can read the PR's files and issue events (pull-requests read, issues read).
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse anything but pull_request
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        echo "::error::Mutation testing runs the PR's code, so it must run on pull_request, which has no secrets and a read-only token."
+        exit 1
+
+    - name: Build with the build-settings records
+      shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+      run: |
+        harness="$GITHUB_ACTION_PATH/../.."
+        report="$RUNNER_TEMP/build-settings-report"
+        rm -rf "$report"
+        dotnet build "$SOLUTION" \
+          "-p:CustomAfterMicrosoftCommonTargets=$harness/build/BuildSettings.targets" \
+          "-p:BuildSettingsReportDir=$report"
+        node "$harness/plugins/factory-harness/ci/build-settings-report.mjs" "$SOLUTION" "$report"
+
+    - name: Mutate the changed code and score it
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        OVERRIDE_USER_IDS: ${{ inputs.override-user-ids }}
+      run: |
+        node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/run-mutation.mjs" \
+          "$RUNNER_TEMP/build-settings-report" "$RUNNER_TEMP/mutation"
