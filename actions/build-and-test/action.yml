@@ -63,9 +63,11 @@ runs:
         harness="$GITHUB_ACTION_PATH/../.."
         results="$RUNNER_TEMP/test-results"
         rm -rf "$results"
-        dotnet test "$SOLUTION" -c "$CONFIGURATION" --no-build --logger trx --results-directory "$results" \
-          --collect "Code Coverage;Format=cobertura"
+        # Each test project runs on its own, so each project's coverage report stays separate.
+        status=0
+        node "$harness/plugins/factory-harness/ci/run-tests.mjs" "$RUNNER_TEMP/build-settings-report" "$results" "$CONFIGURATION" || status=1
         node "$harness/plugins/factory-harness/ci/test-results.mjs" "$RUNNER_TEMP/build-settings-report" "$results"
+        exit $status
 
     - name: Measure coverage
       shell: bash
