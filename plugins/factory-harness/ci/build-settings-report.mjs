@@ -27,8 +27,9 @@ export function solutionProjects(solution, runDotnet = args => spawnSync('dotnet
 }
 
 /**
- * The records in the report folder: each project's path, whether it's a test project and its
- * assembly name. The first line of a record is the path; the rest are name=value pairs.
+ * The records in the report folder: each project's path, whether it's a test project, its assembly
+ * name and the full paths of the projects it references. The first line of a record is the path;
+ * the rest are name=value pairs, and references are separated by `|`.
  */
 export function readRecords(reportDir) {
   if (!fs.existsSync(reportDir)) return [];
@@ -36,11 +37,13 @@ export function readRecords(reportDir) {
     .filter(name => name.endsWith('.txt'))
     .map(name => {
       const [projectPath, ...pairs] = fs.readFileSync(path.join(reportDir, name), 'utf8').split(/\r?\n/).filter(Boolean);
-      const values = Object.fromEntries(pairs.map(pair => pair.split('=', 2)));
+      // Split at the first = only, since a path may hold one.
+      const values = Object.fromEntries(pairs.map(pair => /^([^=]*)=(.*)$/.exec(pair)?.slice(1) ?? [pair, '']));
       return {
         path: projectPath.trim(),
         isTestProject: (values.IsTestProject ?? '').toLowerCase() === 'true',
         assemblyName: values.AssemblyName ?? '',
+        references: (values.ProjectReferences ?? '').split('|').map(reference => reference.trim()).filter(Boolean),
       };
     });
 }

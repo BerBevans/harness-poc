@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { evaluate, solutionProjects } from '../build-settings-report.mjs';
+import { evaluate, readRecords, solutionProjects } from '../build-settings-report.mjs';
 
 const projects = [path.resolve('/repo/src/App/App.csproj'), path.resolve('/repo/tests/App.UnitTests/App.UnitTests.csproj')];
 
@@ -33,4 +35,18 @@ test('a solution with no projects is an error, not a pass', () => {
 test('a failing dotnet sln list is an error', () => {
   const runDotnet = () => ({ status: 1, stdout: '', stderr: 'Could not find solution' });
   assert.throws(() => solutionProjects('/repo/App.slnx', runDotnet), /dotnet sln list failed: Could not find solution/);
+});
+
+test('reads each record, with its project references', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'records-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(dir, '1.txt'),
+    '/r/tests/App.UnitTests/App.UnitTests.csproj\nIsTestProject=true\nAssemblyName=App.UnitTests\n' +
+    'ProjectReferences=/r/src/App/App.csproj|/r/src/a=b/Lib.csproj\n');
+  fs.writeFileSync(path.join(dir, '2.txt'), '/r/src/App/App.csproj\nIsTestProject=\nAssemblyName=App\nProjectReferences=\n');
+  assert.deepEqual(readRecords(dir).sort((a, b) => a.path.localeCompare(b.path)), [
+    { path: '/r/src/App/App.csproj', isTestProject: false, assemblyName: 'App', references: [] },
+    { path: '/r/tests/App.UnitTests/App.UnitTests.csproj', isTestProject: true, assemblyName: 'App.UnitTests',
+      references: ['/r/src/App/App.csproj', '/r/src/a=b/Lib.csproj'] },
+  ]);
 });
