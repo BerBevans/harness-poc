@@ -47,12 +47,15 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 
 ## CI checks for product repos
 
-Product repos call both checks from one workflow triggered by `pull_request_target`:
+Product repos call these checks from one workflow triggered by `pull_request_target`. The `labeled` and `unlabeled` types re-run the size check when its override label changes:
 
 ```yaml
-on: pull_request_target
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 permissions:
   pull-requests: read
+  issues: read
 jobs:
   guardrail-paths:
     name: Guardrail paths
@@ -68,16 +71,25 @@ jobs:
       - uses: <owner>/harness-poc/actions/suppression-scan@v0.1.0
         with:
           exempt-user-ids: <your user ID>
+  pr-size:
+    name: PR size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: <owner>/harness-poc/actions/pr-size@v0.1.0
+        with:
+          exempt-user-ids: <your user ID>
+          override-user-ids: <your user ID>
 ```
 
 - **The guardrail path check** fails any PR that adds, changes, deletes or renames a guardrail file, unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule.
 - **The suppression scan** fails a PR that adds more of any suppression than it removes, counted across the whole PR, or that sets a build property in a project file. It fails closed if GitHub leaves out the diff for a C# or project file that gained lines.
-- **Both must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
+- **The PR size check** fails a PR that changes more than 300 lines, added plus removed, and warns above 250. Blank lines don't count, and within each hunk a removed and an added line that match once whitespace is stripped cancel out, so reindenting is free. It leaves out `packages.lock.json` and EF Core's `Migrations/*.Designer.cs` and `*ModelSnapshot.cs`, and counts everything else. It fails closed if GitHub leaves out the diff for a text file. The `size-override` label lets an oversized PR pass, but only when someone in `override-user-ids` applied it.
+- **All three must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
-- **Make `Guardrail paths`, `Suppression scan` and `Build` required checks** in the repo's ruleset.
+- **Make `Guardrail paths`, `Suppression scan`, `PR size` and `Build` required checks** in the repo's ruleset.
 - **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 
-Both tested against the GitHub API with real PRs. Neither tested yet as a required check in a product repo.
+The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. None is tested yet as a required check in a product repo.
 
 The build-settings and test-results checks run in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
 

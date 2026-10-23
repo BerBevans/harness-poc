@@ -74,7 +74,7 @@ The gate between phases is measured against my review comments, not PRs, over a 
 
 **PR size.** Aim for 200 changed lines; 250 is acceptable and 300 is a hard limit. Above the limit, a PR needs an override label with a justification, for changes that are large but still easy to review. The goal is coherent, reviewable PRs, not one change chopped into pieces to pass the check.
 
-Whitespace-only changes don't count towards the limit. The CI check accepts the override label only when I applied it, not an agent's App.
+Whitespace-only changes don't count towards the limit. The CI check accepts the override label only when I applied it, not an agent's App. The label is `size-override`. Only the generated files a .NET repo commits are left out of the count: `packages.lock.json`, and `*.Designer.cs` and `*ModelSnapshot.cs` inside a `Migrations/` folder. Everything else counts, docs included, because every excluded name is somewhere an agent could put bulk.
 
 ## Security scanning
 
