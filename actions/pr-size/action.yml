@@ -1,0 +1,31 @@
+name: PR size
+description: >
+  Fails a PR that changes more than 300 lines, added plus removed, unless its author is exempt (the
+  listed people and Dependabot) or someone in override-user-ids applied the size-override label.
+  Whitespace-only changes and the generated files a .NET repo commits don't count. Call it from a
+  workflow triggered by pull_request_target, including labeled and unlabeled; it refuses any other
+  event. It reads the diff from the GitHub API and never checks out or runs the PR's code.
+
+inputs:
+  exempt-user-ids:
+    description: Numeric GitHub user IDs exempt from the size limit, comma-separated. Logins are rejected.
+    required: true
+  override-user-ids:
+    description: >
+      Numeric GitHub user IDs whose size-override label lets an oversized PR pass. Usually just the
+      repo owner. Not logins, which can be renamed and then taken.
+    required: true
+  github-token:
+    description: Token used to read the PR's diff and issue events. Needs pull-requests read and issues read.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Count the PR's changed lines
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/pr-size.mjs"
+      env:
+        EXEMPT_USER_IDS: ${{ inputs.exempt-user-ids }}
+        OVERRIDE_USER_IDS: ${{ inputs.override-user-ids }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}

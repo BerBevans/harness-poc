@@ -81,7 +81,7 @@ export async function runOnPullRequest({
     token: env.GITHUB_TOKEN,
     fetchImpl,
   });
-  return evaluate({ author: pr.user, files, changedFileCount: pr.changed_files, exemptUserIds });
+  return evaluate({ author: pr.user, number: pr.number, files, changedFileCount: pr.changed_files, exemptUserIds });
 }
 
 /** Formats a GitHub Actions error annotation, so it shows against the file (and line) in the PR. */
