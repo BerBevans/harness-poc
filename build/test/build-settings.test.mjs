@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, recordedProjects, solutionProjects } from '../../plugins/factory-harness/ci/build-settings-report.mjs';
+import { evaluate, readRecords, recordedProjects, solutionProjects } from '../../plugins/factory-harness/ci/build-settings-report.mjs';
 
 const harnessRoot = fileURLToPath(new URL('../../', import.meta.url));
 const targetsFile = path.join(harnessRoot, 'build/BuildSettings.targets');
@@ -54,6 +54,8 @@ describe('build settings target', { timeout: 600_000 }, () => {
     const { status, output, report } = build();
     assert.equal(status, 0, output);
     assert.equal(report.passed, true, report.lines.join('\n'));
+    const tests = readRecords(reportDir).find(record => record.isTestProject);
+    assert.deepEqual(tests.references, [projectPath()]);
   });
 
   test('every weakened setting in a project file is reported, not just the first', () => {

@@ -33,7 +33,7 @@ const UNMEASURED_FIX =
 
 // Core code is measured from unit tests, which fake the application's boundaries. The code that
 // talks to those boundaries lives in *.Adapters projects, measured from integration tests.
-const isAdapters = record => /\.Adapters$/.test(projectName(record));
+export const isAdapters = record => /\.Adapters$/.test(projectName(record));
 export const GROUPS = [
   { key: 'core', label: 'Core code', testSuffix: '.UnitTests', testKind: 'unit test', isMember: record => !isAdapters(record) },
   { key: 'adapters', label: 'Adapter code', testSuffix: '.IntegrationTests', testKind: 'integration test', isMember: isAdapters },
