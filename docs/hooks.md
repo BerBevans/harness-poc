@@ -171,25 +171,23 @@ This works for interactive sessions once the folder is trusted. It does not work
 
 ## Running headless in CI
 
-A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarketplaces` from the repository. The project install above therefore doesn't load the plugin in CI, and nothing reports that it's missing. CI loads the plugin from a pinned checkout of the harness instead:
+A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarketplaces` from the repository. The project install above therefore doesn't load the plugin in CI, and nothing reports that it's missing. Agent runs use the `run-agent` action instead:
 
 ```yaml
 - uses: actions/checkout@v7
+- uses: <owner>/harness-poc/actions/run-agent@v0.2.0
   with:
-    repository: <owner>/harness-poc
-    ref: v0.1.0
-    path: .harness
-
-- run: >
-    claude -p "$PROMPT"
-    --plugin-dir "$GITHUB_WORKSPACE/.harness/plugins/factory-harness"
-    --output-format stream-json --verbose
-  env:
-    CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    prompt: <the agent's prompt>
+    claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    issue: ${{ github.event.issue.number }}
 ```
 
-- **Check that the plugin loaded.** The first event in the stream, `system/init`, lists the loaded plugins. The workflow stops the run and fails the job if `factory-harness` isn't in `plugins`, or if `plugin_errors` isn't empty.
-- **Don't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
+- **The plugin comes from the action's own copy of the harness.** GitHub downloads the whole harness at the tag in `uses:`, so the plugin is the version you pinned, written once. A reusable workflow can't see which ref it was called at, so it would need the tag repeated as an input, and the two could drift apart.
+- **It installs Claude Code at a pinned version,** `CLAUDE_CODE_VERSION` in `ci/run-agent.mjs`, so an upstream change can't silently change how agents run or authenticate. Upgrading is a harness release, as for Stryker.
+- **It checks that the plugin loaded.** The first event in the stream, `system/init`, lists the loaded plugins with their paths. The run is killed and the job fails unless `factory-harness` loaded from the action's folder and `plugin_errors` is empty or absent. The kill races the agent in principle, but `init` arrives before the first request to the model.
+- **The transcript stays out of the job log,** which is public on a public repo. The stream goes to the file in the action's `transcript` output, and the log gets a summary: the plugin check, the result, turns and duration. Upload the file somewhere private, never as a workflow artifact.
+- **`issue` becomes `FACTORY_ISSUE`,** so a hook that blocks the agent tells it to comment on that issue and write a progress note.
+- **It doesn't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
 - **The token** comes from `claude setup-token`, lasts a year and is stored as the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. CI usage counts against the same subscription allowance as interactive sessions.
 
-Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook.
+Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook. The action's script was tested with 2.1.310: a missing plugin folder was killed at `init` with no request to the model, and a run with the plugin loaded passed. The action itself hasn't run on GitHub yet.

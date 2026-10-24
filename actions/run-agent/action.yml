@@ -1,0 +1,46 @@
+name: Run agent
+description: >
+  Runs one headless Claude Code agent with the factory-harness plugin loaded from this action's own
+  copy of the harness, so the plugin is the version the caller pinned in `uses:`. Installs a pinned
+  Claude Code, authenticates with a claude setup-token OAuth token, and fails the run at startup
+  unless the plugin loaded. The transcript goes to a file, not the job log, which is public on a
+  public repo.
+
+inputs:
+  prompt:
+    description: The agent's prompt.
+    required: true
+  claude-code-oauth-token:
+    description: Token from claude setup-token, so usage stays within the subscription.
+    required: true
+  issue:
+    description: >
+      The issue the agent is working on. Set as FACTORY_ISSUE, so a hook that blocks the agent tells
+      it to comment on the issue and write a progress note.
+    default: ''
+  model:
+    description: The model to use. Leave empty for Claude Code's default.
+    default: ''
+
+outputs:
+  transcript:
+    description: Path of the run's transcript, as stream JSON. Keep it private.
+    value: ${{ steps.run.outputs.transcript }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run the agent
+      id: run
+      shell: bash
+      env:
+        AGENT_PROMPT: ${{ inputs.prompt }}
+        AGENT_MODEL: ${{ inputs.model }}
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        FACTORY_ISSUE: ${{ inputs.issue }}
+      run: |
+        harness="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
+        transcript="$RUNNER_TEMP/agent/transcript.jsonl"
+        echo "transcript=$transcript" >> "$GITHUB_OUTPUT"
+        PLUGIN_DIR="$harness/plugins/factory-harness" \
+          node "$harness/plugins/factory-harness/ci/run-agent.mjs" "$RUNNER_TEMP/agent/tool" "$transcript"
