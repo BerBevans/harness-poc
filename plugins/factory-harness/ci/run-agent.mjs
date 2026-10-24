@@ -59,6 +59,15 @@ export function initProblem(init, pluginDir) {
 const describeResult = result =>
   `${result.subtype} after ${result.num_turns ?? '?'} turns in ${Math.round((result.duration_ms ?? 0) / 1000)}s`;
 
+// Claude Code reports some failures, such as a rejected token, with subtype success and is_error set,
+// and puts the error in result. For an error, result is the reason, not the agent's work.
+const errorDetail = result => {
+  if (!result.is_error) return '';
+  const status = result.api_error_status ? ` API status ${result.api_error_status}.` : '';
+  const reason = typeof result.result === 'string' ? ` ${result.result.slice(0, 300)}` : '';
+  return status + reason;
+};
+
 /**
  * Starts the agent, checks the init event and copies the stream to the transcript file.
  * Resolves to { passed, lines } for runIfMain.
@@ -102,7 +111,7 @@ export function runAgent({ command, args, pluginDir, transcriptFile, env = proce
       if (!init) return { passed: false, lines: [...lines, '::error::The stream ended before system/init, so the plugin check couldn\'t run.'] };
       if (!result) return { passed: false, lines: [...lines, `::error::Claude Code exited with code ${code} and no result.`] };
       if (result.is_error || result.subtype !== 'success' || code !== 0) {
-        return { passed: false, lines: [...lines, `::error::The agent run failed: ${describeResult(result)}, exit code ${code}.`] };
+        return { passed: false, lines: [...lines, `::error::The agent run failed: ${describeResult(result)}, exit code ${code}.${errorDetail(result)}`] };
       }
       return { passed: true, lines: [...lines, `The agent finished: ${describeResult(result)}.`] };
     };

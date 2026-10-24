@@ -96,6 +96,14 @@ test('an error result, a missing result or a non-zero exit fails', async t => {
   assert.match(nonZero.lines.join('\n'), /exit code 2/);
 });
 
+test('a rejected token fails with its reason, though Claude Code calls the result a success', async t => {
+  // The shape Claude Code 2.1.310 gives for an invalid CLAUDE_CODE_OAUTH_TOKEN.
+  const rejected = { type: 'result', subtype: 'success', is_error: true, api_error_status: 401, result: 'Failed to authenticate. API Error: 401 Invalid bearer token' };
+  const run = await runFake(t, [init(), rejected], { exit: 1 });
+  assert.equal(run.passed, false);
+  assert.match(run.lines.join('\n'), /API status 401\. Failed to authenticate/);
+});
+
 test('a command that does not exist fails', async t => {
   const run = await runAgent({ command: path.join(tempDir(t), 'no-claude'), args: [], pluginDir, transcriptFile: path.join(tempDir(t), 't.jsonl') });
   assert.equal(run.passed, false);
