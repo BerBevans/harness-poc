@@ -1,0 +1,75 @@
+name: Run-agent check
+
+# Proves the run-agent action on a GitHub runner before a release. Started by hand only, because each
+# run uses the subscription. Run it from main: the pass job calls the action at @main.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-agent-check
+  cancel-in-progress: false
+
+jobs:
+  plugin-loads:
+    name: Agent runs with the plugin loaded
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Called by its remote path, as a product repo would, so GitHub downloads the harness into its
+      # actions folder and the plugin is checked at that path.
+      - uses: BerBevans/harness-poc/actions/run-agent@main
+        with:
+          prompt: Reply with the single word ready, and do nothing else.
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          model: haiku
+
+  plugin-broken:
+    name: Agent run fails when the plugin is broken
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Break the plugin manifest
+        run: echo '{ not json' > plugins/factory-harness/.claude-plugin/plugin.json
+
+      - name: Run the agent with the broken plugin
+        id: agent
+        continue-on-error: true
+        uses: ./actions/run-agent
+        with:
+          prompt: Reply with the single word ready, and do nothing else.
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          model: haiku
+
+      - name: Check the run was stopped at init
+        env:
+          OUTCOME: ${{ steps.agent.outcome }}
+          TRANSCRIPT: ${{ steps.agent.outputs.transcript }}
+        # Reads the transcript without printing it: the repo is public.
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const fail = message => { console.log(`::error::${message}`); process.exit(1); };
+            if (process.env.OUTCOME !== "failure") fail(`The action step should have failed, but its outcome was ${process.env.OUTCOME}.`);
+            const events = fs.readFileSync(process.env.TRANSCRIPT, "utf8").trim().split("\n").map(line => JSON.parse(line));
+            const [init] = events;
+            if (init?.type !== "system" || init.subtype !== "init") fail("The transcript does not start with system/init.");
+            const errors = init.plugin_errors ?? [];
+            const loaded = (init.plugins ?? []).some(plugin => plugin.name === "factory-harness");
+            if (errors.length === 0 && loaded) fail("init shows the broken plugin as loaded with no errors.");
+            if (events.some(event => event.type === "result")) fail("The run reached a result, so it was not stopped at init.");
+            console.log(`Stopped at init after ${events.length} event(s): ${errors.length} plugin error(s), plugin loaded: ${loaded}.`);
+          '
