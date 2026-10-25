@@ -61,21 +61,21 @@ jobs:
     name: Guardrail paths
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.1.0
+      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.2.0
         with:
           exempt-user-ids: <your user ID>
   suppression-scan:
     name: Suppression scan
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/suppression-scan@v0.1.0
+      - uses: <owner>/harness-poc/actions/suppression-scan@v0.2.0
         with:
           exempt-user-ids: <your user ID>
   pr-size:
     name: PR size
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/pr-size@v0.1.0
+      - uses: <owner>/harness-poc/actions/pr-size@v0.2.0
         with:
           exempt-user-ids: <your user ID>
           override-user-ids: <your user ID>
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/build-and-test@v0.1.0
+      - uses: <owner>/harness-poc/actions/build-and-test@v0.2.0
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/mutation-test@v0.1.0
+      - uses: <owner>/harness-poc/actions/mutation-test@v0.2.0
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -161,7 +161,7 @@ The integration tests copy `samples/consumer` into `.test-work/` and break it in
 Register the harness marketplace at a pinned tag and enable the plugin, then commit the `.claude/settings.json` it writes:
 
 ```sh
-claude plugin marketplace add <owner>/harness-poc#v0.1.0 --scope project
+claude plugin marketplace add <owner>/harness-poc#v0.2.0 --scope project
 claude plugin install factory-harness@factory-harness --scope project
 ```
 
@@ -190,4 +190,4 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
 - **It doesn't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
 - **The token** comes from `claude setup-token`, lasts a year and is stored as the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. CI usage counts against the same subscription allowance as interactive sessions.
 
-Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook. The action's script was tested with 2.1.310: a missing plugin folder was killed at `init` with no request to the model, and a run with the plugin loaded passed. The action itself hasn't run on GitHub yet.
+Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook. The action's script was tested with 2.1.310: a missing plugin folder was killed at `init` with no request to the model, and a run with the plugin loaded passed. The action was run on GitHub with 2.1.310 on 2026-10-25 by the hand-started `Run-agent check` workflow: called by its remote path, it loaded the plugin from GitHub's actions folder and a Haiku run passed; with `plugin.json` corrupted, the run was killed at `init` with one plugin error and no result.
