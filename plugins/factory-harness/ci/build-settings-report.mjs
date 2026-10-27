@@ -17,13 +17,21 @@ const FIX =
 // Paths compared case-insensitively, with one separator style, so Windows and Linux agree.
 const samePath = p => path.resolve(p).replace(/\\/g, '/').toLowerCase();
 
-/** The full paths of the projects in a solution, as `dotnet sln list` gives them. */
-export function solutionProjects(solution, runDotnet = args => spawnSync('dotnet', args, { encoding: 'utf8' })) {
+const defaultDotnet = args => spawnSync('dotnet', args, { encoding: 'utf8' });
+
+/** The full paths of the projects in a solution, as `dotnet sln list` gives them, which may be none. */
+export function listProjects(solution, runDotnet = defaultDotnet) {
   const result = runDotnet(['sln', solution, 'list']);
   if (result.status !== 0) throw new Error(`dotnet sln list failed: ${result.stderr || result.stdout}`);
   const projects = result.stdout.split(/\r?\n/).map(line => line.trim()).filter(line => /\.\w+proj$/i.test(line));
-  if (projects.length === 0) throw new Error(`${solution} lists no projects.`);
   return projects.map(project => path.resolve(path.dirname(solution), project));
+}
+
+/** The full paths of the projects in a solution. Throws if there are none. */
+export function solutionProjects(solution, runDotnet = defaultDotnet) {
+  const projects = listProjects(solution, runDotnet);
+  if (projects.length === 0) throw new Error(`${solution} lists no projects.`);
+  return projects;
 }
 
 /**
