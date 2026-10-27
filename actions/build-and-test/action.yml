@@ -6,7 +6,9 @@ description: >
   passed and every test project follows the naming convention. Then measures coverage as two
   figures, core code from unit tests and *.Adapters projects from integration tests: on a push,
   stores it as the branch's baseline, and on a PR, fails if it fell below the target branch's,
-  unless someone in override-user-ids applied the coverage-override label. Call it from a workflow
+  unless someone in override-user-ids applied the coverage-override label. On a push or a run by
+  hand, a solution with no projects yet skips the build and stores an empty figure, so a new repo
+  can store its first baseline; a PR with no projects still fails. Call it from a workflow
   triggered by pull_request (including labeled and unlabeled) and push, never pull_request_target:
   a build runs the PR's code. The guardrail path check stops a PR changing the workflow that calls this.
 
@@ -41,7 +43,18 @@ runs:
         echo "::error::The build runs the PR's code, so it must not run on pull_request_target, which has the repo's secrets and a write token. Use pull_request."
         exit 1
 
+    - name: Check for an empty solution
+      id: empty
+      # A new repo has no projects yet. On a push or a run by hand, store an empty figure so the
+      # first PR has a baseline. A PR always builds, so a PR with no projects still fails.
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+      shell: bash
+      env:
+        SOLUTION: ${{ inputs.solution }}
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/empty-solution.mjs" "$SOLUTION" "$RUNNER_TEMP/coverage.json"
+
     - name: Build with the build-settings check
+      if: steps.empty.outputs.empty != 'true'
       shell: bash
       env:
         SOLUTION: ${{ inputs.solution }}
@@ -57,6 +70,7 @@ runs:
         node "$harness/plugins/factory-harness/ci/build-settings-report.mjs" "$SOLUTION" "$report"
 
     - name: Test, and check that every test ran and passed
+      if: steps.empty.outputs.empty != 'true'
       shell: bash
       env:
         SOLUTION: ${{ inputs.solution }}
@@ -72,6 +86,7 @@ runs:
         exit $status
 
     - name: Measure coverage
+      if: steps.empty.outputs.empty != 'true'
       shell: bash
       run: |
         node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/coverage.mjs" measure \

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { evaluate, readRecords, solutionProjects } from '../build-settings-report.mjs';
+import { evaluate, listProjects, readRecords, solutionProjects } from '../build-settings-report.mjs';
 
 const projects = [path.resolve('/repo/src/App/App.csproj'), path.resolve('/repo/tests/App.UnitTests/App.UnitTests.csproj')];
 
@@ -30,6 +30,11 @@ test('reads project paths from dotnet sln list, relative to the solution', () =>
 test('a solution with no projects is an error, not a pass', () => {
   const runDotnet = () => ({ status: 0, stdout: 'No projects found in the solution.\n' });
   assert.throws(() => solutionProjects('/repo/App.slnx', runDotnet), /lists no projects/);
+});
+
+test('listing a solution with no projects gives none, without throwing', () => {
+  const runDotnet = () => ({ status: 0, stdout: 'No projects found in the solution.\n' });
+  assert.deepEqual(listProjects('/repo/App.slnx', runDotnet), []);
 });
 
 test('a failing dotnet sln list is an error', () => {
