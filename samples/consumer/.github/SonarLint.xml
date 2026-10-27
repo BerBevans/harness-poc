@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Size and complexity limits. Keys are Sonar's own parameter names; a wrong key is silently ignored,
+  so check that a rule fires after changing this file. S104 counts lines of code, not blank lines
+  or comments. S138 doesn't apply to test projects.
+-->
+<AnalysisInput>
+  <Rules>
+    <Rule>
+      <Key>S104</Key>
+      <Parameters>
+        <Parameter><Key>maximumFileLocThreshold</Key><Value>500</Value></Parameter>
+      </Parameters>
+    </Rule>
+    <Rule>
+      <Key>S138</Key>
+      <Parameters>
+        <Parameter><Key>max</Key><Value>50</Value></Parameter>
+      </Parameters>
+    </Rule>
+    <Rule>
+      <Key>S3776</Key>
+      <Parameters>
+        <Parameter><Key>threshold</Key><Value>15</Value></Parameter>
+        <Parameter><Key>propertyThreshold</Key><Value>3</Value></Parameter>
+      </Parameters>
+    </Rule>
+  </Rules>
+</AnalysisInput>

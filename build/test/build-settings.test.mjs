@@ -20,6 +20,7 @@ let repo;
 let reportDir;
 let originalProject;
 
+const sonarLintFile = () => path.join(repo, '.github/SonarLint.xml');
 const projectPath = () => path.join(repo, projectFile);
 const writeProject = text => fs.writeFileSync(projectPath(), text);
 // Adds properties to the sample's project file, just before its closing tag.
@@ -31,6 +32,7 @@ function build(...extraArgs) {
     'build', path.join(repo, 'Consumer.slnx'), '-nologo', '-v:q',
     `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`,
     `-p:BuildSettingsReportDir=${reportDir}`,
+    `-p:FactorySonarLintFile=${sonarLintFile()}`,
     ...extraArgs,
   ], { encoding: 'utf8' });
   const solution = path.join(repo, 'Consumer.slnx');
@@ -96,6 +98,34 @@ describe('build settings target', { timeout: 600_000 }, () => {
     const { status, output } = build('-p:TreatWarningsAsErrors=false');
     assert.notEqual(status, 0);
     assert.match(output, /error FH0001: TreatWarningsAsErrors is 'false'/);
+  });
+
+  test('a project that removes the Sonar analyser is caught', () => {
+    addToProject('  <ItemGroup><PackageReference Remove="SonarAnalyzer.CSharp" /></ItemGroup>');
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    assert.match(output, /error FH0001: The Sonar analyser \(SonarAnalyzer\.CSharp\) isn't loaded/);
+  });
+
+  test('a project that swaps in its own SonarLint.xml is caught, with or without removing the shared one', () => {
+    fs.mkdirSync(path.join(repo, 'src/Consumer/loose'), { recursive: true });
+    fs.copyFileSync(sonarLintFile(), path.join(repo, 'src/Consumer/loose/SonarLint.xml'));
+    for (const items of [
+      '<AdditionalFiles Remove="@(AdditionalFiles)" /><AdditionalFiles Include="loose/SonarLint.xml" />',
+      '<AdditionalFiles Include="loose/SonarLint.xml" />',
+      '<AdditionalFiles Remove="@(AdditionalFiles)" />',
+    ]) {
+      addToProject(`  <ItemGroup>${items}</ItemGroup>`);
+      const { status, output } = build();
+      assert.notEqual(status, 0, items);
+      assert.match(output, /error FH0001: The size and complexity thresholds must come only from/, items);
+    }
+  });
+
+  test('a build without the expected SonarLint.xml path fails closed', () => {
+    const { status, output } = build('-p:FactorySonarLintFile=');
+    assert.notEqual(status, 0);
+    assert.match(output, /error FH0002: FactorySonarLintFile is ''/);
   });
 
   test('a project that stops the target being imported is missing from the report', () => {
