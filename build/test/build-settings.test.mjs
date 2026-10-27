@@ -122,6 +122,41 @@ describe('build settings target', { timeout: 600_000 }, () => {
     }
   });
 
+  test('a project that adds an analyser config file of any other name is caught, through either item', () => {
+    fs.writeFileSync(path.join(repo, 'src/Consumer/relax.txt'), 'is_global = true\ndotnet_diagnostic.CA1716.severity = none\n');
+    for (const item of ['GlobalAnalyzerConfigFiles', 'EditorConfigFiles']) {
+      addToProject(`  <ItemGroup><${item} Include="relax.txt" /></ItemGroup>`);
+      const { status, output } = build();
+      assert.notEqual(status, 0, item);
+      assert.match(output, /error FH0001: Rule severities may come only from \.editorconfig and \.globalconfig files; this project adds .*relax\.txt/, item);
+    }
+  });
+
+  test('a project that drops the root .editorconfig is caught, in a target or by switching discovery off', () => {
+    for (const xml of [
+      '  <Target Name="Strip" BeforeTargets="CoreCompile"><ItemGroup><EditorConfigFiles Remove="@(EditorConfigFiles)" /></ItemGroup></Target>',
+      '  <PropertyGroup><DiscoverEditorConfigFiles>false</DiscoverEditorConfigFiles></PropertyGroup>',
+    ]) {
+      addToProject(xml);
+      const { status, output } = build();
+      assert.notEqual(status, 0, xml);
+      assert.match(output, /error FH0001: The repo's root \.editorconfig \(.*\) isn't among this project's analyser config files/, xml);
+    }
+  });
+
+  test('a nested .editorconfig and a .globalconfig are allowed, since both are guardrails by name', () => {
+    fs.writeFileSync(path.join(repo, 'src/Consumer/.editorconfig'), '[*.cs]\nindent_size = 4\n');
+    fs.writeFileSync(path.join(repo, 'src/Consumer/rules.globalconfig'), 'is_global = true\n');
+    addToProject('  <ItemGroup><GlobalAnalyzerConfigFiles Include="rules.globalconfig" /></ItemGroup>');
+    try {
+      const { status, output } = build();
+      assert.equal(status, 0, output);
+    } finally {
+      fs.rmSync(path.join(repo, 'src/Consumer/.editorconfig'));
+      fs.rmSync(path.join(repo, 'src/Consumer/rules.globalconfig'));
+    }
+  });
+
   test('a build without the expected SonarLint.xml path fails closed', () => {
     const { status, output } = build('-p:FactorySonarLintFile=');
     assert.notEqual(status, 0);
