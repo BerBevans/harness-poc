@@ -69,6 +69,25 @@
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
       Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
+    <!--
+      Size and complexity limits come from the Sonar analyser, with thresholds in the repo's
+      SonarLint.xml, whose full path CI passes as FactorySonarLintFile. A project could otherwise
+      remove the analyser or swap in a looser SonarLint.xml.
+    -->
+    <ItemGroup>
+      <_FactorySonarAnalyzer Include="@(Analyzer)" Condition="'%(Filename)' == 'SonarAnalyzer.CSharp'" />
+      <_FactorySonarLint Include="@(AdditionalFiles->'%(FullPath)')" Condition="'%(Filename)%(Extension)' == 'SonarLint.xml'" />
+      <_FactoryForeignSonarLint Include="@(_FactorySonarLint)" Exclude="$(FactorySonarLintFile)" />
+    </ItemGroup>
+    <Error Code="FH0002"
+      Condition="'$(FactorySonarLintFile)' == '' or !Exists('$(FactorySonarLintFile)')"
+      Text="FactorySonarLintFile is '$(FactorySonarLintFile)'; CI must pass the full path of the repo's .github/SonarLint.xml, and the file must exist." />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySonarAnalyzer)' == ''"
+      Text="The Sonar analyser (SonarAnalyzer.CSharp) isn't loaded, so the size and complexity limits aren't checked. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySonarLint)' == '' or '@(_FactoryForeignSonarLint)' != ''"
+      Text="The size and complexity thresholds must come only from $(FactorySonarLintFile); this project uses '@(_FactorySonarLint, ', ')'. $(_FactoryFix)" />
     <!-- Run settings can exclude code from coverage, so a project may not choose its own. -->
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunSettingsFilePath)' != ''"

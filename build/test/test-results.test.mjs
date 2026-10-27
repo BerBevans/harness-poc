@@ -31,7 +31,7 @@ function buildAndTest() {
   fs.rmSync(reportDir, { recursive: true, force: true });
   fs.rmSync(resultsDir, { recursive: true, force: true });
   const built = dotnet('build', 'Consumer.slnx', '-nologo', '-v:q', '-c', 'Release',
-    `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`, `-p:BuildSettingsReportDir=${reportDir}`);
+    `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`, `-p:BuildSettingsReportDir=${reportDir}`, `-p:FactorySonarLintFile=${path.join(repo, '.github/SonarLint.xml')}`);
   assert.equal(built.status, 0, built.stdout + built.stderr);
   dotnet('test', 'Consumer.slnx', '-nologo', '-c', 'Release', '--no-build', '--logger', 'trx', '--results-directory', resultsDir);
   const records = readRecords(reportDir);

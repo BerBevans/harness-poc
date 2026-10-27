@@ -32,7 +32,7 @@ function runCheck(...filenames) {
   const reportDir = path.join(repo, '.build-settings-report');
   fs.rmSync(reportDir, { recursive: true, force: true });
   const built = spawnSync('dotnet', ['build', 'Consumer.slnx', '-nologo', '-v:q',
-    `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`, `-p:BuildSettingsReportDir=${reportDir}`], { cwd: repo, encoding: 'utf8' });
+    `-p:CustomAfterMicrosoftCommonTargets=${targetsFile}`, `-p:BuildSettingsReportDir=${reportDir}`, `-p:FactorySonarLintFile=${path.join(repo, '.github/SonarLint.xml')}`], { cwd: repo, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stdout + built.stderr);
   const output = [];
   const { result } = check({
