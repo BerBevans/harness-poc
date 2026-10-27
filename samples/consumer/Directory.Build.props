@@ -8,4 +8,9 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisMode>All</AnalysisMode>
   </PropertyGroup>
+  <!-- The size and complexity limits, as a product repo sets them up. -->
+  <ItemGroup>
+    <PackageReference Include="SonarAnalyzer.CSharp" Version="10.35.0.4138" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory).github/SonarLint.xml" Link="SonarLint.xml" />
+  </ItemGroup>
 </Project>

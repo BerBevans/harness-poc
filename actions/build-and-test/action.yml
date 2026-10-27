@@ -52,7 +52,8 @@ runs:
         rm -rf "$report"
         dotnet build "$SOLUTION" -c "$CONFIGURATION" \
           "-p:CustomAfterMicrosoftCommonTargets=$harness/build/BuildSettings.targets" \
-          "-p:BuildSettingsReportDir=$report"
+          "-p:BuildSettingsReportDir=$report" \
+          "-p:FactorySonarLintFile=$GITHUB_WORKSPACE/.github/SonarLint.xml"
         node "$harness/plugins/factory-harness/ci/build-settings-report.mjs" "$SOLUTION" "$report"
 
     - name: Test, and check that every test ran and passed
