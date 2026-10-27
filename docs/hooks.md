@@ -61,21 +61,21 @@ jobs:
     name: Guardrail paths
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.2.0
+      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.4.0
         with:
           exempt-user-ids: <your user ID>
   suppression-scan:
     name: Suppression scan
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/suppression-scan@v0.2.0
+      - uses: <owner>/harness-poc/actions/suppression-scan@v0.4.0
         with:
           exempt-user-ids: <your user ID>
   pr-size:
     name: PR size
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/pr-size@v0.2.0
+      - uses: <owner>/harness-poc/actions/pr-size@v0.4.0
         with:
           exempt-user-ids: <your user ID>
           override-user-ids: <your user ID>
@@ -89,7 +89,7 @@ jobs:
 - **Make `Guardrail paths`, `Suppression scan`, `PR size`, `Build` and `Mutation testing` required checks** in the repo's ruleset.
 - **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 
-The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. None is tested yet as a required check in a product repo.
+The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. All three run as required checks in the first product repo, but so far only on the owner's PRs, which are exempt from all three, so none has yet judged an agent's PR.
 
 The build-settings and test-results checks run in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
 
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/build-and-test@v0.2.0
+      - uses: <owner>/harness-poc/actions/build-and-test@v0.4.0
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/mutation-test@v0.2.0
+      - uses: <owner>/harness-poc/actions/mutation-test@v0.4.0
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -163,7 +163,7 @@ The integration tests copy `samples/consumer` into `.test-work/` and break it in
 Register the harness marketplace at a pinned tag and enable the plugin, then commit the `.claude/settings.json` it writes:
 
 ```sh
-claude plugin marketplace add <owner>/harness-poc#v0.2.0 --scope project
+claude plugin marketplace add <owner>/harness-poc#v0.4.0 --scope project
 claude plugin install factory-harness@factory-harness --scope project
 ```
 
@@ -177,7 +177,7 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: <owner>/harness-poc/actions/run-agent@v0.2.0
+- uses: <owner>/harness-poc/actions/run-agent@v0.4.0
   with:
     prompt: <the agent's prompt>
     claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
