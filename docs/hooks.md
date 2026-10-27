@@ -89,7 +89,7 @@ jobs:
 - **Make `Guardrail paths`, `Suppression scan`, `PR size`, `Build` and `Mutation testing` required checks** in the repo's ruleset.
 - **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 
-The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. All three run as required checks in the first product repo, but so far only on the owner's PRs, which are exempt from the path and suppression checks.
+The guardrail path check and the suppression scan are tested against the GitHub API with real PRs; the PR size check only against a fake API so far. All three run as required checks in the first product repo, but so far only on the owner's PRs, which are exempt from all three, so none has yet judged an agent's PR.
 
 The build-settings and test-results checks run in the product repo's build workflow. That workflow is triggered by `pull_request`, because building runs the PR's code:
 
