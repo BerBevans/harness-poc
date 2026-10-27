@@ -88,6 +88,36 @@
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'@(_FactorySonarLint)' == '' or '@(_FactoryForeignSonarLint)' != ''"
       Text="The size and complexity thresholds must come only from $(FactorySonarLintFile); this project uses '@(_FactorySonarLint, ', ')'. $(_FactoryFix)" />
+    <!--
+      Rule severities come only from .editorconfig and .globalconfig files, which are guardrails by
+      name at any depth, and the root .editorconfig must be one of them. A project could otherwise
+      add a config file of any other name, through GlobalAnalyzerConfigFiles or EditorConfigFiles,
+      to switch rules off, or drop the root .editorconfig, in a target or with
+      DiscoverEditorConfigFiles. The SDK generates one more file, from build properties, which sets
+      no severities. The repo root is the folder that holds the .github folder FactorySonarLintFile
+      is in. The SDK finds .editorconfig files from the project's own source files, not the code it
+      generates into obj or adds from packages, so a project with no source of its own in the repo has
+      none and isn't checked for it.
+    -->
+    <PropertyGroup>
+      <_FactoryRootEditorConfig>$([System.IO.Path]::GetFullPath('$([System.IO.Path]::GetDirectoryName($(FactorySonarLintFile)))/../.editorconfig'))</_FactoryRootEditorConfig>
+      <_FactoryRepoRoot>$([MSBuild]::NormalizeDirectory($([System.IO.Path]::GetDirectoryName($(_FactoryRootEditorConfig)))))</_FactoryRepoRoot>
+      <_FactoryGeneratedEditorConfig>$([System.IO.Path]::GetFullPath('$(GeneratedMSBuildEditorConfigFile)'))</_FactoryGeneratedEditorConfig>
+    </PropertyGroup>
+    <ItemGroup>
+      <_FactoryAnalyzerConfig Include="@(EditorConfigFiles->'%(FullPath)')" />
+      <_FactorySource Include="@(Compile->'%(FullPath)')" Exclude="$([MSBuild]::NormalizeDirectory($(MSBuildProjectDirectory), $(BaseIntermediateOutputPath)))**" />
+      <_FactorySource Remove="@(_FactorySource)" Condition="!$([System.String]::Copy('%(FullPath)').StartsWith('$(_FactoryRepoRoot)'))" />
+      <_FactoryRootAnalyzerConfig Include="@(_FactoryAnalyzerConfig)" Condition="'%(Identity)' == '$(_FactoryRootEditorConfig)'" />
+      <_FactoryForeignAnalyzerConfig Include="@(_FactoryAnalyzerConfig)"
+        Condition="'%(Filename)%(Extension)' != '.editorconfig' and '%(Extension)' != '.globalconfig' and '%(Identity)' != '$(_FactoryGeneratedEditorConfig)'" />
+    </ItemGroup>
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySource)' != '' and '@(_FactoryRootAnalyzerConfig)' == ''"
+      Text="The repo's root .editorconfig ($(_FactoryRootEditorConfig)) isn't among this project's analyser config files, so its rule severities don't apply. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryForeignAnalyzerConfig)' != ''"
+      Text="Rule severities may come only from .editorconfig and .globalconfig files; this project adds @(_FactoryForeignAnalyzerConfig, ', '). $(_FactoryFix)" />
     <!-- Run settings can exclude code from coverage, so a project may not choose its own. -->
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunSettingsFilePath)' != ''"
