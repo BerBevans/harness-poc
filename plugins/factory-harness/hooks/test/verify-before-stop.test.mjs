@@ -12,6 +12,7 @@ function fakeDependencies(overrides = {}) {
     lastGreen: () => 'state-1',
     saveGreen: (_, value) => { calls.savedGreen = value; },
     runBuild: () => { calls.builds += 1; return { ok: true, output: '' }; },
+    solutionHasProjects: () => true,
     findTestProjects: () => ['tests/App.UnitTests/App.UnitTests.csproj'],
     runTests: () => ({ ok: true, output: '' }),
     readProgressNote: () => null,
@@ -111,4 +112,12 @@ test('progress note statuses', () => {
   assert.ok(!isValidProgressNote('Status: finished'));
   assert.ok(!isValidProgressNote(''));
   assert.ok(!isValidProgressNote(null));
+});
+
+test('skips the build, records the state and tells the user when the solution has no projects', () => {
+  const { deps, calls } = fakeDependencies({ ...failingBuild, solutionHasProjects: () => false });
+  const output = decideStop({}, deps);
+  assert.equal(calls.builds, 0);
+  assert.equal(calls.savedGreen, 'state-2');
+  assert.match(output.systemMessage, /no projects yet/);
 });
