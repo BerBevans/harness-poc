@@ -41,6 +41,13 @@ export function decideStop(input, deps) {
   const fingerprint = deps.fingerprint(root);
   if (fingerprint === deps.lastGreen(root)) return null;
 
+  // A new product repo's solution has no projects until the architecture session adds them, and
+  // dotnet build fails on it. There's no code to check, and CI still fails a PR with no projects.
+  if (!deps.solutionHasProjects(root, solution)) {
+    deps.saveGreen(root, fingerprint);
+    return warnUser('Factory harness: the solution has no projects yet, so the build and tests were skipped.');
+  }
+
   const { failures, testProjectCount } = runChecks(root, solution, deps);
 
   if (failures.length === 0) {

@@ -1,4 +1,7 @@
-import { bash, decisionTable, edit, powershell, read, REPO, write } from './helpers.mjs';
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { evaluate } from '../guard.mjs';
+import { bash, decisionTable, edit, fakeContext, powershell, read, REPO, write } from './helpers.mjs';
 
 const inRepo = relative => `${REPO}\\${relative}`;
 
@@ -54,3 +57,34 @@ decisionTable({
     ['redirect to /dev/null', bash('dotnet build > /dev/null')],
   ],
 });
+
+// An architecture session relaxes the rule for architecture tests only.
+decisionTable({
+  context: fakeContext({ env: { FACTORY_ARCHITECTURE_SESSION: '1' } }),
+  blocked: [
+    ['architecture session: Edit of .editorconfig', edit(inRepo('.editorconfig'), 'a', 'b')],
+    ['architecture session: Write of a workflow', write(inRepo('.github\\workflows\\ci.yml'), 'on: push')],
+    ['architecture session: architecture tests under .github', write(inRepo('.github\\Tasks.ArchitectureTests\\x.cs'), 'x')],
+    ['architecture session: .runsettings in architecture tests', write(inRepo('tests\\Tasks.ArchitectureTests\\a.runsettings'), 'x')],
+    ['architecture session: .editorconfig in architecture tests', write(inRepo('tests\\Tasks.ArchitectureTests\\.editorconfig'), 'x')],
+  ],
+  allowed: [
+    ['architecture session: Edit of an architecture test', edit(inRepo('tests\\Tasks.ArchitectureTests\\LayerTests.cs'), 'a', 'b')],
+    ['architecture session: git rm of an architecture test', bash('git rm tests/Tasks.ArchitectureTests/LayerTests.cs')],
+  ],
+});
+
+test('a factory run never gets the architecture session exemption', () => {
+  const context = fakeContext({ env: { FACTORY_ARCHITECTURE_SESSION: '1', FACTORY_ISSUE: '42' } });
+  const input = edit(inRepo('tests\\Tasks.ArchitectureTests\\LayerTests.cs'), 'a', 'b');
+  assert.match(evaluate(input, context), /is a guardrail file/);
+});
+
+for (const value of ['true', '0', ' 1', '']) {
+  decisionTable({
+    context: fakeContext({ env: { FACTORY_ARCHITECTURE_SESSION: value } }),
+    blocked: [
+      [`architecture flag "${value}": Edit of an architecture test`, edit(inRepo('tests\\Tasks.ArchitectureTests\\LayerTests.cs'), 'a', 'b')],
+    ],
+  });
+}
