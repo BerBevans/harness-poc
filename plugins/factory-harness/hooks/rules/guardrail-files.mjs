@@ -21,7 +21,8 @@ const GUARDRAIL_TEMPLATES = new Set([
 ]);
 
 // `home` is optional: CI checks repo-relative paths, where there is no home folder.
-export function isGuardrailPath(normalisedPath, home) {
+// `allowArchitectureTests` is for the hook only; CI always counts architecture tests as guardrails.
+export function isGuardrailPath(normalisedPath, home, { allowArchitectureTests = false } = {}) {
   if (home && isUnder(normalisedPath, `${normalisePath(home)}/.claude`)) return false;
 
   const parts = segments(normalisedPath);
@@ -31,7 +32,15 @@ export function isGuardrailPath(normalisedPath, home) {
     || name.endsWith('.runsettings')
     || /^stryker-config\.(json|ya?ml)$/.test(name)
     || normalisedPath.endsWith('.config/dotnet-tools.json')
-    || parts.some(part => GUARDRAIL_FOLDERS.has(part) || part.endsWith('.architecturetests'));
+    || parts.some(part => GUARDRAIL_FOLDERS.has(part))
+    || (!allowArchitectureTests && parts.some(part => part.endsWith('.architecturetests')));
+}
+
+// The owner sets FACTORY_ARCHITECTURE_SESSION=1 when starting an architecture session, which writes the
+// architecture tests. An agent can't change its own hook's environment, and a factory run (FACTORY_ISSUE)
+// never gets the exemption. CI still fails any agent PR that touches these paths.
+function architectureSession(env) {
+  return env.FACTORY_ARCHITECTURE_SESSION === '1' && !env.FACTORY_ISSUE?.trim();
 }
 
 function checkDotnetCommands(command, nextStep) {
@@ -59,13 +68,16 @@ export function check(change, context) {
     `Blocked: ${path} is a guardrail file. Guardrail files are human-owned and change only through the ` +
     `harness repo. ${nextStep}`;
 
+  const options = { allowArchitectureTests: architectureSession(context.env) };
+  const guarded = path => isGuardrailPath(path, context.home, options);
+
   if (change.isWrite) {
-    const path = change.paths.find(p => isGuardrailPath(p, context.home));
+    const path = change.paths.find(guarded);
     if (path) return blockedPath(path);
   }
 
   if (change.command) {
-    const target = commandWriteTargets(change.command).find(t => isGuardrailPath(expandHome(t, context.home), context.home));
+    const target = commandWriteTargets(change.command).find(t => guarded(expandHome(t, context.home)));
     if (target) return blockedPath(target);
     return checkDotnetCommands(change.command, nextStep);
   }
