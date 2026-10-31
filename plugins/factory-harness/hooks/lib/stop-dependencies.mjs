@@ -67,6 +67,11 @@ export function createStopDependencies(env) {
       const result = run('dotnet', ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'], { cwd: root, timeoutSeconds: 300 });
       return { ok: result.ok, output: result.stdout + result.stderr };
     },
+    // Unknown counts as having projects, so the build runs and reports the real problem.
+    solutionHasProjects: (root, solution) => {
+      const result = run('dotnet', ['sln', solution, 'list'], { cwd: root, timeoutSeconds: 60 });
+      return !result.ok || result.stdout.split(/\r?\n/).some(line => /\.\w+proj\s*$/i.test(line));
+    },
     findTestProjects,
     runTests: (root, project) => {
       // Quiet verbosity hides assertion messages; the console logger at normal brings them back.
