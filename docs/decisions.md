@@ -33,7 +33,7 @@ Each consumer pins its harness version. The harness has its own tests, including
 
 **Agent identities.** Each agent role (spec, test, implementer, reviewer, security) has its own GitHub App with only the permissions its job needs. That allows code-owner review of agent PRs, keeps agent work distinguishable from mine in the metrics, and uses short-lived tokens. My own interactive sessions run under my identity. Proposed: the reviewer reports through a status check that is optional in the advise phase and required in the veto phase, and its App merges in the merge phase.
 
-**Hosting.** The to-do app runs on a small VPS costing a few pounds a month, behind Cloudflare Tunnel and Cloudflare Access. It opens no ports and needs no agent-written authentication in the first version. All Cloudflare services use a personal account.
+**Hosting.** The to-do app runs on a small VPS costing a few pounds a month, behind Cloudflare Tunnel and Cloudflare Access. It opens no inbound ports. Access handles sign-in, so agents never write a sign-in flow or handle passwords or sessions. The app validates Access's signed token with the framework's standard handler, reads the email from it, and decides membership itself, so inviting people and assigning work stay in the repo. All Cloudflare services use a personal account.
 
 ## Intake and specs
 
