@@ -8,7 +8,7 @@
     {
       "name": "factory-harness",
       "source": "./plugins/factory-harness",
-      "description": "Guardrail, secrets and git hooks, format on commit, and a Stop hook that requires a green build"
+      "description": "Guardrail, secrets and git hooks, format on commit, a Stop hook that requires a green build, and the product and architecture session skills"
     }
   ]
 }
