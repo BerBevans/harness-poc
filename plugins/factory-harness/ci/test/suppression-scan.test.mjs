@@ -42,6 +42,12 @@ test('a build setting in a project file fails, without calling it a suppression'
   assert.match(result.lines.at(-1), /remove them from project files/);
 });
 
+test('a coverage exclusion in C# is described as one, not as a suppression', () => {
+  const result = scan(AGENT, [diff('src/A.cs', ['+[ExcludeFromCodeCoverage]'])]);
+  assert.equal(result.lines[0], '::error file=src/A.cs,line=1::Excludes code from coverage: [ExcludeFromCodeCoverage].');
+  assert.match(result.lines.at(-1), /needs tests instead/);
+});
+
 test('pointing a test project at run settings fails, since they can exclude code from coverage', () => {
   const result = scan(AGENT, [diff('tests/A.UnitTests/A.UnitTests.csproj', ['+    <RunSettingsFilePath>x.runsettings</RunSettingsFilePath>'])]);
   assert.equal(result.passed, false);
