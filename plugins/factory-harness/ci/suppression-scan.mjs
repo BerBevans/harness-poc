@@ -5,23 +5,25 @@
 // It counts across the whole PR: for each rule, occurrences in added lines against occurrences
 // in removed lines. Moving a method and its suppression to another file is therefore allowed.
 
-import { PROJECT_FILE_SUPPRESSIONS, suppressionRulesFor } from '../hooks/rules/suppressions.mjs';
+import { kindOf, suppressionRulesFor } from '../hooks/rules/suppressions.mjs';
 import { normalisePath } from '../hooks/lib/paths.mjs';
 import { annotation, exemptResult, incompleteListing, isExempt, runIfMain, runOnPullRequest } from './lib/pull-request.mjs';
 
 const CHECK_NAME = 'suppression scan';
 
 const FIX =
-  'Suppressions are not allowed; fix the underlying warning or test instead. Build settings belong in the ' +
+  'Suppressions are not allowed; fix the underlying warning or test instead. Code excluded from coverage ' +
+  'needs tests instead. Build settings belong in the ' +
   "shared Directory.Build.props, which is human-owned, so remove them from project files. If you believe a " +
   "suppression or setting is needed, don't add it: comment on the issue to explain why.";
 
-const BUILD_SETTINGS = new Set(PROJECT_FILE_SUPPRESSIONS.map(rule => rule.name));
-
 // A project-file match may switch a setting on, not off, so it isn't called a suppression.
-const describe = name => BUILD_SETTINGS.has(name)
-  ? `Sets ${name}, a build setting only the shared Directory.Build.props may set.`
-  : `Adds a suppression: ${name}.`;
+const DESCRIPTIONS = {
+  'build-setting': name => `Sets ${name}, a build setting only the shared Directory.Build.props may set.`,
+  'coverage-exclusion': name => `Excludes code from coverage: ${name}.`,
+  'suppression': name => `Adds a suppression: ${name}.`,
+};
+const describe = name => DESCRIPTIONS[kindOf(name)](name);
 
 /**
  * Splits a unified diff hunk list, as the API's `patch` field gives it, into added and removed text.

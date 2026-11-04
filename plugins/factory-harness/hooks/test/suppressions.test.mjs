@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bash, decisionTable, edit, fakeContext, REPO, write } from './helpers.mjs';
 import { evaluate } from '../guard.mjs';
-import { findNewSuppressions } from '../rules/suppressions.mjs';
+import { blockMessage, findNewSuppressions } from '../rules/suppressions.mjs';
 
 const code = `${REPO}\\src\\Tasks\\TaskService.cs`;
 const testCode = `${REPO}\\tests\\Tasks.UnitTests\\TaskTests.cs`;
@@ -74,6 +74,27 @@ decisionTable({
 test('findNewSuppressions reports each kind found, for the CI diff scan', () => {
   const added = '#pragma warning disable CA1\n#nullable disable';
   assert.deepEqual(findNewSuppressions('src/a.cs', added), ['#pragma warning disable', '#nullable disable']);
+});
+
+test('the block message names what each kind of finding needs instead', () => {
+  const step = 'Next step.';
+  assert.equal(blockMessage(['#pragma warning disable'], step),
+    "Blocked: this change adds a suppression (#pragma warning disable). Fix the underlying warning or test instead. If you believe it is needed, don't add it. Next step.");
+  assert.match(blockMessage(['[ExcludeFromCodeCoverage]'], step), /^Blocked: this change excludes code from coverage \(\[ExcludeFromCodeCoverage\]\)\. Write tests for that code instead\./);
+  assert.match(blockMessage(['TreatAsLocalProperty', 'NoWarn'], step),
+    /^Blocked: this change sets a build setting \(TreatAsLocalProperty, NoWarn\) that only the shared Directory\.Build\.props may set\. Remove it from the project file\./);
+  assert.doesNotMatch(blockMessage(['NoWarn'], step), /suppression|underlying warning/);
+});
+
+test('a block with two kinds gives one sentence each, opening with Blocked once', () => {
+  const message = blockMessage(['[DebuggerHidden]', '#nullable disable'], 'Next step.');
+  assert.match(message, /^Blocked: this change adds a suppression \(#nullable disable\)\..* This change also excludes code from coverage \(\[DebuggerHidden\]\)\./);
+  assert.equal(message.match(/Blocked/g).length, 1);
+});
+
+test('the hook blocks a coverage exclusion with the coverage wording', () => {
+  const reason = evaluate(write(`${REPO}\\src\\New.cs`, '[ExcludeFromCodeCoverage]\nclass A {}'), fakeContext());
+  assert.match(reason, /excludes code from coverage/);
 });
 
 test('the first Write of a file with a pragma is blocked when nothing was there before', () => {

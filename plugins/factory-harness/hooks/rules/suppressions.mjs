@@ -6,6 +6,14 @@ import { isGeneratedCode } from '../lib/paths.mjs';
 import { commandWriteTargets } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
+// The attributes the coverage collector skips by default. The bare name is matched, so an alias or
+// a fully qualified name is caught too.
+const COVERAGE_EXCLUSIONS = [
+  { name: '[ExcludeFromCodeCoverage]', pattern: /\bExcludeFromCodeCoverage(Attribute)?\b/g },
+  { name: '[DebuggerNonUserCode]', pattern: /\bDebuggerNonUserCode(Attribute)?\b/g },
+  { name: '[DebuggerHidden]', pattern: /\bDebuggerHidden(Attribute)?\b/g },
+];
+
 export const CODE_SUPPRESSIONS = [
   { name: '#pragma warning disable', pattern: /#\s*pragma\s+warning\s+disable\b/gi },
   { name: '#nullable disable', pattern: /#\s*nullable\s+disable\b/gi },
@@ -18,11 +26,7 @@ export const CODE_SUPPRESSIONS = [
   { name: 'Skip.If / Skip.When', pattern: /\bSkip\.(If|IfNot|When|Unless)\s*\(/g },
   { name: '[Ignore]', pattern: /[[,]\s*Ignore(Attribute)?\s*[\](,]/g },
   { name: '[Explicit]', pattern: /[[,]\s*Explicit(Attribute)?\s*[\](,]/g },
-  // The attributes the coverage collector skips by default. The bare name is matched, so an alias or
-  // a fully qualified name is caught too.
-  { name: '[ExcludeFromCodeCoverage]', pattern: /\bExcludeFromCodeCoverage(Attribute)?\b/g },
-  { name: '[DebuggerNonUserCode]', pattern: /\bDebuggerNonUserCode(Attribute)?\b/g },
-  { name: '[DebuggerHidden]', pattern: /\bDebuggerHidden(Attribute)?\b/g },
+  ...COVERAGE_EXCLUSIONS,
 ];
 
 export const PROJECT_FILE_SUPPRESSIONS = [
@@ -45,6 +49,31 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   { name: 'TreatAsLocalProperty', pattern: /\bTreatAsLocalProperty\s*=/gi },
 ];
 
+const COVERAGE_EXCLUSION_NAMES = new Set(COVERAGE_EXCLUSIONS.map(rule => rule.name));
+const BUILD_SETTING_NAMES = new Set(PROJECT_FILE_SUPPRESSIONS.map(rule => rule.name));
+
+/** What a found rule does: 'build-setting', 'coverage-exclusion' or 'suppression'. */
+export const kindOf = name =>
+  BUILD_SETTING_NAMES.has(name) ? 'build-setting'
+    : COVERAGE_EXCLUSION_NAMES.has(name) ? 'coverage-exclusion'
+      : 'suppression';
+
+const BLOCK_REASONS = {
+  'suppression': names => `adds a suppression (${names}). Fix the underlying warning or test instead.`,
+  'coverage-exclusion': names => `excludes code from coverage (${names}). Write tests for that code instead.`,
+  'build-setting': names =>
+    `sets a build setting (${names}) that only the shared Directory.Build.props may set. Remove it from the project file.`,
+};
+
+/** The block message for the rules found, one sentence per kind. */
+export function blockMessage(found, nextStep) {
+  const reasons = Object.entries(BLOCK_REASONS)
+    .map(([kind, reason]) => [reason, found.filter(name => kindOf(name) === kind)])
+    .filter(([, names]) => names.length > 0)
+    .map(([reason, names], i) => `${i === 0 ? 'Blocked: this change' : 'This change also'} ${reason(names.join(', '))}`);
+  return `${reasons.join(' ')} If you believe it is needed, don't add it. ${nextStep}`;
+}
+
 const isCodeFile = path => path.endsWith('.cs') && !isGeneratedCode(path);
 const isProjectFile = path => /\.(csproj|props|targets)$/.test(path);
 
@@ -64,10 +93,7 @@ export function findNewSuppressions(normalisedPath, addedText, removedText = '')
 
 export function check(change, context) {
   const nextStep = nextStepAfterBlock(context.env);
-  const blocked = found =>
-    `Blocked: this change adds a suppression (${found.join(', ')}). Suppressions and weakened build settings ` +
-    'are not allowed; fix the underlying warning or test instead. If you believe a suppression is needed, ' +
-    `don't add it. ${nextStep}`;
+  const blocked = found => blockMessage(found, nextStep);
 
   if (change.isWrite) {
     for (const path of change.paths) {
