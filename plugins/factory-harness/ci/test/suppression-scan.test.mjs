@@ -48,6 +48,12 @@ test('pointing a test project at run settings fails, since they can exclude code
   assert.match(result.lines[0], /Sets RunSettingsFilePath/);
 });
 
+test('marking a property local in a project file fails, since it can unhook the build settings', () => {
+  const result = scan(AGENT, [diff('src/Tasks/Tasks.csproj', ['+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="CustomAfterMicrosoftCommonTargets">'])]);
+  assert.equal(result.passed, false);
+  assert.match(result.lines[0], /Sets TreatAsLocalProperty/);
+});
+
 test('switching a setting on in a project file also fails, as dotnet new does with Nullable', () => {
   const result = scan(AGENT, [diff('src/New/New.csproj', ['+    <Nullable>enable</Nullable>'], { status: 'added' })]);
   assert.equal(result.passed, false);
