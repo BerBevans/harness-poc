@@ -47,6 +47,7 @@ decisionTable({
     ['CodeAnalysisRuleSet', addToProject('<CodeAnalysisRuleSet>relaxed.ruleset</CodeAnalysisRuleSet>')],
     ['RunSettingsFilePath', addToProject('<RunSettingsFilePath>coverage.runsettings</RunSettingsFilePath>')],
     ['VSTestSetting', addToProject('<VSTestSetting>coverage.runsettings</VSTestSetting>')],
+    ['TreatAsLocalProperty', edit(project, '<Project Sdk="Microsoft.NET.Sdk">', '<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="CustomAfterMicrosoftCommonTargets">')],
     ['property in an imported props file', write(`${REPO}\\build\\relaxed.props`, '<Project><PropertyGroup><NoWarn>CS1591</NoWarn></PropertyGroup></Project>')],
     ['shell append of a pragma', bash('echo "#pragma warning disable" >> src/Tasks/TaskService.cs')],
   ],

@@ -40,6 +40,9 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   // Run settings can exclude modules, classes or source files from coverage.
   { name: 'RunSettingsFilePath', pattern: /<\s*RunSettingsFilePath\b/gi },
   { name: 'VSTestSetting', pattern: /<\s*VSTestSetting\b/gi },
+  // Lets a project override properties set on the command line, such as the hook-up of the build
+  // settings targets.
+  { name: 'TreatAsLocalProperty', pattern: /\bTreatAsLocalProperty\s*=/gi },
 ];
 
 const isCodeFile = path => path.endsWith('.cs') && !isGeneratedCode(path);
