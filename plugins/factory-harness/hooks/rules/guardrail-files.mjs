@@ -15,6 +15,13 @@ const GUARDRAIL_FILE_NAMES = new Set([
 ]);
 const GUARDRAIL_FOLDERS = new Set(['.github', '.claude']);
 
+// Container build files decide what reaches production: the base image, the user and which projects
+// go in. `Dockerfile.prod`, `web.Dockerfile` and per-Dockerfile ignore files count too.
+const isContainerBuildFile = name =>
+  ['dockerfile', 'containerfile'].includes(name)
+  || /^(dockerfile|containerfile)\./.test(name)
+  || /\.(dockerfile|containerfile|dockerignore|containerignore)$/.test(name);
+
 // `dotnet new` templates that create guardrail files.
 const GUARDRAIL_TEMPLATES = new Set([
   'editorconfig', 'globaljson', 'nugetconfig', 'buildprops', 'buildtargets', 'packagesprops', 'tool-manifest',
@@ -31,6 +38,7 @@ export function isGuardrailPath(normalisedPath, home, { allowArchitectureTests =
     || name.endsWith('.globalconfig')
     || name.endsWith('.runsettings')
     || /^stryker-config\.(json|ya?ml)$/.test(name)
+    || isContainerBuildFile(name)
     || normalisedPath.endsWith('.config/dotnet-tools.json')
     || parts.some(part => GUARDRAIL_FOLDERS.has(part))
     || (!allowArchitectureTests && parts.some(part => part.endsWith('.architecturetests')));
