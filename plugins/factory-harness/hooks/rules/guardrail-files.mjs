@@ -13,7 +13,10 @@ const GUARDRAIL_FILE_NAMES = new Set([
   'nuget.config',
   'global.json',
 ]);
-const GUARDRAIL_FOLDERS = new Set(['.github', '.claude']);
+// `deploy` holds the reference copy of the server setup: the Compose file, the deploy scripts and
+// the sudo rule. It's matched at any depth, like the others, because the hook can't tell where the
+// repo root is.
+const GUARDRAIL_FOLDERS = new Set(['.github', '.claude', 'deploy']);
 
 // Container build files decide what reaches production: the base image, the user and which projects
 // go in. `Dockerfile.prod`, `web.Dockerfile` and per-Dockerfile ignore files count too.
