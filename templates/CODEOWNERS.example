@@ -31,6 +31,15 @@ global.json                     @harness-owner
 stryker-config.json             @harness-owner
 stryker-config.yml              @harness-owner
 stryker-config.yaml             @harness-owner
+Dockerfile                      @harness-owner
+dockerfile                      @harness-owner
+Dockerfile.*                    @harness-owner
+*.Dockerfile                    @harness-owner
+Containerfile                   @harness-owner
+Containerfile.*                 @harness-owner
+.dockerignore                   @harness-owner
+*.dockerignore                  @harness-owner
+.containerignore                @harness-owner
 .github/                        @harness-owner
 .claude/                        @harness-owner
 *.ArchitectureTests/            @harness-owner

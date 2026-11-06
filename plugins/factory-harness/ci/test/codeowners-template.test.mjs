@@ -59,6 +59,8 @@ test('the casings .NET tools look for are owned', () => {
   const variants = [
     'nuget.config', 'NuGet.config', 'src/NuGet.Config', 'src/.config/dotnet-tools.json',
     'stryker-config.yml', 'stryker-config.yaml', '.claude/agents/reviewer.md',
+    'dockerfile', 'Dockerfile.dev', 'src/web.Dockerfile', 'Containerfile', 'Dockerfile.dockerignore',
+    '.containerignore',
   ];
   assert.deepEqual(variants.filter(path => ownersOf(path).length === 0), []);
 });

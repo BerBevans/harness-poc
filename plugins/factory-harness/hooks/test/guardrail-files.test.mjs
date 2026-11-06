@@ -23,6 +23,14 @@ decisionTable({
     ['Write of a workflow', write(inRepo('.github\\workflows\\ci.yml'), 'on: push')],
     ['Write of CODEOWNERS', write(inRepo('.github\\CODEOWNERS'), '* @someone')],
     ['Edit of project .claude settings', edit(inRepo('.claude\\settings.json'), 'a', 'b')],
+    ['Edit of a Dockerfile', edit(inRepo('Dockerfile'), 'USER app', 'USER root')],
+    ['Edit of a Dockerfile, any case', edit(inRepo('src\\Web\\dockerfile'), 'a', 'b')],
+    ['Write of a named Dockerfile', write(inRepo('web.Dockerfile'), 'FROM x')],
+    ['Write of a Dockerfile variant', write(inRepo('Dockerfile.dev'), 'FROM x')],
+    ['Write of a Containerfile', write(inRepo('Containerfile'), 'FROM x')],
+    ['Edit of .dockerignore', edit(inRepo('.dockerignore'), 'tests/', '')],
+    ['Write of a per-Dockerfile ignore file', write(inRepo('Dockerfile.dockerignore'), '')],
+    ['shell redirect into a Dockerfile', bash('echo "USER root" >> Dockerfile')],
     ['Edit of an architecture test', edit(inRepo('tests\\Tasks.ArchitectureTests\\LayerTests.cs'), 'a', 'b')],
     ['shell redirect into .editorconfig', bash('echo "root = true" > .editorconfig')],
     ['shell append into nested props', bash('cat >> src/Directory.Build.props <<EOF')],
@@ -55,6 +63,8 @@ decisionTable({
     ['dotnet new classlib', bash('dotnet new classlib -n Tasks')],
     ['dotnet remove package', bash('dotnet remove src/Tasks package Old.Package')],
     ['redirect to /dev/null', bash('dotnet build > /dev/null')],
+    ['Write of a doc about Dockerfiles', write(inRepo('docs\\dockerfile-notes.md'), 'x')],
+    ['Write of a class named after Docker', write(inRepo('src\\Tasks\\DockerfileParser.cs'), 'x')],
   ],
 });
 
