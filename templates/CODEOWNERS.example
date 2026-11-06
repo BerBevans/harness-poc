@@ -42,6 +42,7 @@ Containerfile.*                 @harness-owner
 .containerignore                @harness-owner
 .github/                        @harness-owner
 .claude/                        @harness-owner
+deploy/                         @harness-owner
 *.ArchitectureTests/            @harness-owner
 
 # Product and architecture docs. Agents may propose changes; the owner approves them.

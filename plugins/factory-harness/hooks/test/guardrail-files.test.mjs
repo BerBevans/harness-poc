@@ -31,6 +31,9 @@ decisionTable({
     ['Edit of .dockerignore', edit(inRepo('.dockerignore'), 'tests/', '')],
     ['Write of a per-Dockerfile ignore file', write(inRepo('Dockerfile.dockerignore'), '')],
     ['shell redirect into a Dockerfile', bash('echo "USER root" >> Dockerfile')],
+    ['Edit of the Compose file in deploy', edit(inRepo('deploy\\compose.yaml'), '127.0.0.1:8080', '8080')],
+    ['Write of a deploy script, any case', write(inRepo('Deploy\\house-todo-deploy'), 'x')],
+    ['shell redirect into deploy', bash('echo "ALL ALL=(ALL) ALL" >> deploy/sudoers')],
     ['Edit of an architecture test', edit(inRepo('tests\\Tasks.ArchitectureTests\\LayerTests.cs'), 'a', 'b')],
     ['shell redirect into .editorconfig', bash('echo "root = true" > .editorconfig')],
     ['shell append into nested props', bash('cat >> src/Directory.Build.props <<EOF')],
@@ -64,6 +67,7 @@ decisionTable({
     ['dotnet remove package', bash('dotnet remove src/Tasks package Old.Package')],
     ['redirect to /dev/null', bash('dotnet build > /dev/null')],
     ['Write of a doc about Dockerfiles', write(inRepo('docs\\dockerfile-notes.md'), 'x')],
+    ['Write of a class about deploys', write(inRepo('src\\Tasks\\DeployStatus.cs'), 'x')],
     ['Write of a class named after Docker', write(inRepo('src\\Tasks\\DockerfileParser.cs'), 'x')],
   ],
 });

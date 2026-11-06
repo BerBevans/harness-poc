@@ -8,11 +8,12 @@ export const GUARDRAIL_EXAMPLES = [
   'NuGet.Config', 'global.json', '.config/dotnet-tools.json', 'stryker-config.json',
   'tests/coverage.runsettings', '.github/workflows/ci.yml', '.github/CODEOWNERS', '.claude/settings.json',
   'tests/Tasks.ArchitectureTests/LayerTests.cs', 'Dockerfile', 'src/Web/Dockerfile', '.dockerignore',
+  'deploy/compose.yaml',
 ];
 
 // Files that are neither guardrails nor human-owned docs.
 export const ORDINARY_EXAMPLES = ['src/Tasks/TaskList.cs', 'tests/Tasks.UnitTests/TaskListTests.cs', 'README.md', 'docs/github.md',
-  'docs/dockerfile-notes.md'];
+  'docs/dockerfile-notes.md', 'src/Tasks/DeployStatus.cs'];
 
 export const changed = (...filenames) => filenames.map(filename => ({ filename, status: 'modified' }));
 
