@@ -13,7 +13,10 @@ jobs:
     name: Hook tests
     runs-on: ubuntu-latest
     steps:
+      # Tags, for the test that checks the docs' examples name the newest one.
       - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
 
       - uses: actions/setup-node@v7
         with:
