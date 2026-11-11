@@ -52,8 +52,6 @@ runs:
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         FACTORY_ISSUE: ${{ inputs.issue }}
       run: |
-        # The payload has every comment on the issue, strangers' included, so the agent never sees it.
-        rm -f "$GITHUB_EVENT_PATH"
         harness="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
         transcript="$RUNNER_TEMP/agent/transcript.jsonl"
         echo "transcript=$transcript" >> "$GITHUB_OUTPUT"
