@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CLAUDE_CODE_VERSION, agentArguments, initProblem, installClaudeCode, runAgent } from '../run-agent.mjs';
+import {
+  CLAUDE_CODE_VERSION, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, runAgent,
+} from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
 const init = (overrides = {}) => ({
@@ -36,10 +38,41 @@ function runFake(t, lines, { exit = 0, hang = false } = {}) {
     .then(result => ({ ...result, transcript: fs.readFileSync(transcriptFile, 'utf8') }));
 }
 
-test('the arguments load the plugin, stream JSON and never use --bare', () => {
-  const args = agentArguments({ prompt: 'Do it', pluginDir });
-  assert.deepEqual(args, ['-p', 'Do it', '--plugin-dir', pluginDir, '--output-format', 'stream-json', '--verbose']);
-  assert.deepEqual(agentArguments({ prompt: 'p', pluginDir, model: 'haiku' }).slice(-2), ['--model', 'haiku']);
+const fence = { maxTurns: 20, allowedTools: ['Read(./**)', 'Bash(git status *)'], deny: ['Read(//proc/**)'] };
+
+test('the arguments load the plugin, stream JSON, fence the tools and never use --bare', () => {
+  const args = agentArguments({ prompt: 'Do it', pluginDir, ...fence });
+  assert.deepEqual(args, [
+    '-p', 'Do it', '--plugin-dir', pluginDir, '--output-format', 'stream-json', '--verbose',
+    '--permission-mode', 'dontAsk', '--max-turns', '20',
+    '--allowedTools', 'Read(./**)', 'Bash(git status *)', '--disallowedTools', 'Read(//proc/**)',
+  ]);
+  assert.deepEqual(agentArguments({ prompt: 'p', pluginDir, model: 'haiku', ...fence }).slice(-2), ['--model', 'haiku']);
+});
+
+test('allow rules are read one per line, so a command rule keeps its spaces', () => {
+  assert.deepEqual(parseAllowedTools('Read(./**)\n  Bash(dotnet test *)\r\n\n'), ['Read(./**)', 'Bash(dotnet test *)']);
+});
+
+test('an allow rule that grants a file tool or Bash everywhere is rejected', () => {
+  for (const rule of ['Read', 'Bash', 'Write', 'Grep', 'Glob', 'Edit', 'Read(*)', 'Edit(**)', 'Read(//**)', 'Read(~/**)', 'Bash( * )']) {
+    assert.throws(() => parseAllowedTools(`Read(./**)\n${rule}`), /allows the tool everywhere/, rule);
+  }
+  assert.throws(() => parseAllowedTools(' \n'), /AGENT_ALLOWED_TOOLS is empty/);
+});
+
+test('the turn cap must be a positive whole number', () => {
+  assert.equal(parseMaxTurns('60'), 60);
+  for (const bad of ['', '0', '-3', '2.5', '20 turns', undefined]) assert.throws(() => parseMaxTurns(bad), /AGENT_MAX_TURNS/);
+});
+
+test('the deny list fences reads and edits away from secrets, the runner temp folder and the plugin', () => {
+  const deny = deniedTools({ runnerTemp: '/home/runner/work/_temp', pluginDir: '/a/plugins/factory-harness' });
+  for (const place of ['//proc/**', '//etc/**', '~/.ssh/**', '~/.gitconfig', '~/.claude/**',
+    '//home/runner/work/_temp/**', '//a/plugins/factory-harness/**']) {
+    assert.ok(deny.includes(`Read(${place})`), `Read(${place})`);
+    assert.ok(deny.includes(`Edit(${place})`), `Edit(${place})`);
+  }
 });
 
 test('Claude Code is installed at the pinned version, once', t => {

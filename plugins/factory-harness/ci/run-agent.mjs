@@ -9,9 +9,15 @@
 // The stream is the session transcript, so it goes to a file, never to the job log, which is public
 // on a public repo. The log gets a summary only.
 //
+// The agent runs in dontAsk mode, so any tool call its role's list doesn't allow is refused. The list
+// may not grant a file tool or Bash without a path or command, and a fixed deny list, which no
+// caller can change, fences the file tools away from the places on a runner that hold secrets or
+// the harness itself. Deny rules beat allow rules. Bash can still read anything, so the role lists
+// keep it narrow, and the steps that post an agent's output check it for secrets.
+//
 // Usage: node run-agent.mjs <tool folder> <transcript file>
-// Environment: AGENT_PROMPT, PLUGIN_DIR, optional AGENT_MODEL, plus CLAUDE_CODE_OAUTH_TOKEN and
-// FACTORY_ISSUE, which pass through to the agent.
+// Environment: AGENT_PROMPT, PLUGIN_DIR, AGENT_MAX_TURNS, AGENT_ALLOWED_TOOLS (one rule per line),
+// optional AGENT_MODEL, plus CLAUDE_CODE_OAUTH_TOKEN and FACTORY_ISSUE, which pass through.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -31,12 +37,47 @@ export function installClaudeCode(toolDir, runNpm = args => spawnSync('npm', arg
   return command;
 }
 
+// Tools that must name a path or command in an allow rule. A bare rule allows them everywhere.
+const UNFENCED_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit'];
+
+/** Parses the role's allow rules, one per line. Throws on a rule that grants a tool everywhere. */
+export function parseAllowedTools(text) {
+  const rules = String(text ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (rules.length === 0) throw new Error('AGENT_ALLOWED_TOOLS is empty. List the tools the role needs.');
+  const bare = rules.find(rule => UNFENCED_TOOLS.includes(rule) || /\(\s*(\/\/|~\/|\/)?\*{0,2}\s*\)$/.test(rule));
+  if (bare) throw new Error(`"${bare}" allows the tool everywhere. Name a path, such as Read(./**), or a command.`);
+  return rules;
+}
+
+/** Parses the turn cap. Throws unless it's a positive whole number. */
+export function parseMaxTurns(text) {
+  if (!/^[1-9]\d*$/.test(String(text ?? ''))) throw new Error(`AGENT_MAX_TURNS must be a positive whole number, not "${text}".`);
+  return Number(text);
+}
+
+/**
+ * The fixed deny rules. Read rules cover the tools that read files, and Edit rules cover Write.
+ * An absolute path is written with a leading //. The runner's temp folder holds the event payload,
+ * which has every comment on the issue, and the transcript; the plugin folder holds the guard hook.
+ */
+export function deniedTools({ runnerTemp, pluginDir }) {
+  const absolute = folder => `/${path.resolve(folder)}/**`;
+  const places = ['//proc/**', '//sys/**', '//dev/**', '//run/**', '//etc/**',
+    '~/.ssh/**', '~/.config/**', '~/.gitconfig', '~/.claude/**', '~/.claude.json',
+    absolute(runnerTemp), absolute(pluginDir)];
+  return places.flatMap(place => [`Read(${place})`, `Edit(${place})`]);
+}
+
 /** Claude Code's arguments. No --bare: bare mode ignores CLAUDE_CODE_OAUTH_TOKEN. */
-export function agentArguments({ prompt, pluginDir, model }) {
+export function agentArguments({ prompt, pluginDir, model, maxTurns, allowedTools, deny }) {
   return [
     '-p', prompt,
     '--plugin-dir', pluginDir,
     '--output-format', 'stream-json', '--verbose',
+    '--permission-mode', 'dontAsk',
+    '--max-turns', String(maxTurns),
+    '--allowedTools', ...allowedTools,
+    '--disallowedTools', ...deny,
     ...(model ? ['--model', model] : []),
   ];
 }
@@ -127,9 +168,17 @@ await runIfMain(import.meta.url, async env => {
   if (!env.AGENT_PROMPT) throw new Error('AGENT_PROMPT is empty.');
   if (!env.PLUGIN_DIR) throw new Error('PLUGIN_DIR is empty.');
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is empty, so the run would fall back to other credentials or fail.');
+  if (!env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is empty, so the deny list can\'t fence the runner\'s temp folder.');
 
   const command = installClaudeCode(toolDir);
-  const args = agentArguments({ prompt: env.AGENT_PROMPT, pluginDir: env.PLUGIN_DIR, model: env.AGENT_MODEL });
+  const args = agentArguments({
+    prompt: env.AGENT_PROMPT,
+    pluginDir: env.PLUGIN_DIR,
+    model: env.AGENT_MODEL,
+    maxTurns: parseMaxTurns(env.AGENT_MAX_TURNS),
+    allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
+    deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
+  });
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   return runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env });
 });
