@@ -156,13 +156,23 @@ jobs:
               return use && parts.find(part => part.tool_use_id === use.id);
             };
             const status = resultOf("git status");
-            if (!status || status.is_error) problems.push("The allowed Bash command did not run.");
+            if (!status) problems.push("The agent never ran git status, the allowed Bash command.");
+            else if (status.is_error) problems.push("git status, the allowed Bash command, was refused or failed.");
             const listing = resultOf("ls -l");
             const listed = listing ? JSON.stringify(listing.content).slice(0, 200) : "never ran";
             const refused = (result.permission_denials ?? []).some(denial => denial.tool_input?.command?.startsWith("ls -l"));
             console.log(`ls of the event file: ${refused ? "refused" : listed}`);
             if (!refused && !listed.includes("No such file")) problems.push("The agent could see the event payload file.");
             for (const problem of problems) console.log(`::error::${problem}`);
+            // On a failure, list each tool call and how it ended, but never its output, so a skipped
+            // step can be told from a refused one. Left out if the token reached the transcript.
+            if (problems.length > 0 && !text.includes(process.env.TOKEN)) {
+              const ended = new Map(parts.filter(part => part.tool_use_id).map(part => [part.tool_use_id, part.is_error ? "error or refused" : "ran"]));
+              for (const use of parts.filter(part => part.type === "tool_use")) {
+                const target = String(use.input?.command ?? use.input?.file_path ?? "").slice(0, 120);
+                console.log(`${use.name} ${target}: ${ended.get(use.id) ?? "no result"}`);
+              }
+            }
             if (problems.length > 0) process.exit(1);
             console.log(`The fence held: ${denied.length} refusal(s), allowed write and Bash worked, event file unseen.`);
           '
