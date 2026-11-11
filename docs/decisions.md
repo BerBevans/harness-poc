@@ -39,10 +39,13 @@ Each consumer pins its harness version. The harness has its own tests, including
 
 GitHub Issues are the factory's intake. The spec author and the implementer are separate agents, so the implementer works to a target it did not set.
 
-1. Refine the spec in the issue with a spec agent.
-2. Write acceptance criteria as Given/When/Then, and decide at spec time which scenarios are visible to the implementer and which are holdouts.
-3. Apply the `ready` label as the Definition of Ready. It starts the implementer, either automatically through an Action or manually.
-4. The implementer's first commit copies the spec into `docs/specs/`, so the spec and code merge in the same PR. The issue stays the conversation; the repo is the record.
+1. **Refine the spec in the issue with a spec agent.** I start a round by applying `needs-spec`, or by commenting on an issue that has it. The spec agent rewrites the issue body as the current spec: a summary, Given/When/Then acceptance criteria and numbered open questions, with my original request kept in a collapsed section. It then comments with what changed. Each comment of mine starts another round.
+2. Decide at spec time which scenarios are visible to the implementer and which are holdouts. Holdout drafts never go in the issue. Until the test agent and the holdout job exist, every scenario is visible.
+3. **One issue, one PR.** The spec agent estimates the change's size. If it won't fit in about 250 changed lines, it proposes a split into smaller issues and stops, and I create them. The 300-line limit stays while I review the code.
+4. Apply the `ready` label as the Definition of Ready. It removes `needs-spec` and starts the implementer, either automatically through an Action or manually.
+5. The implementer's first commit copies the spec into `docs/specs/`, so the spec and code merge in the same PR. The issue stays the conversation; the repo is the record.
+
+Only I can start a run. The workflow checks who applied the label or wrote the comment, as the override labels do.
 
 ## Ambiguity handling
 
@@ -53,6 +56,7 @@ The implementer behaves like a senior developer: it states its interpretation an
 - **Non-blocking assumptions** are everything else. The implementer proceeds and records them in the PR.
 - **A stop partway through** means committing work in progress and a progress note in `.factory/progress.md`, so the resumed run doesn't start from scratch.
 - **Answers** are written back into the spec, not left only in the comment thread.
+- **A change that outgrows its spec:** past about 250 changed lines, the implementer stops as it would at a blocking assumption, and the issue is split.
 
 Work resumes only when I re-apply the `ready` label. A reply comment alone doesn't restart it, because a clarification may take several rounds.
 
@@ -193,6 +197,10 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 **CI backstops every hook rule,** since hooks only match text and can be got round. Build settings are asserted by a target that CI imports last, from the pinned harness checkout, through `CustomAfterMicrosoftCommonTargets`. It fails if warnings-as-errors, nullable, `AnalysisMode` (overall or for any category) or code-style enforcement are weakened, analysers are switched off, a project chooses its own run settings, a project doesn't load the Sonar analyser or uses any `SonarLint.xml` but the repo's, a project takes rule severities from a file that isn't an `.editorconfig` or `.globalconfig`, or drops the root `.editorconfig`, or `NoWarn` holds anything beyond the SDK defaults, however the change was made. Exceptions for a product are rule severities in its `.editorconfig`, not `NoWarn`. Each project the target checks leaves a record, and CI fails if any project in the solution has none. Local builds don't run it; it moves into the build package when that exists. Test results fail the run unless every test ran and passed, judged from each test's own result in the TRX files: `dotnet test` reports a skipped test as a pass, and the TRX summary counters miss skips. A test project with no results fails too. A diff scan rejects suppressions in added lines, using the same rules as the hooks. It counts across the whole PR, so moving code with its suppression passes, and it exempts the same people as the path check. In project files it rejects the build properties outright, even when they switch a setting on, because they belong in the shared, human-owned `Directory.Build.props`. A path check rejects agent PRs that touch guardrail files.
 
 **Agent runs in CI use the harness's `run-agent` action,** which loads the plugin with `--plugin-dir` from the action's own copy of the harness, so the pinned tag is written once. A reusable workflow can't see which ref it was called at, so it would need the tag repeated as an input. A headless run ignores marketplaces declared in the repository and drops the plugin without any error. The action therefore fails any run whose startup event doesn't list the plugin as loaded. Runs authenticate with a `claude setup-token` OAuth token, so usage stays within the subscription, and they don't use `--bare`, because bare mode ignores that token.
+
+**Agents work on files only.** An agent run holds no GitHub token: the checkout keeps no credentials, and the job's own token is read-only. The workflow builds the agent's input from the issue body and from comments by me and the role's App only, so nobody else's text reaches an agent. The agent writes its results to files: the spec and a comment, or commits on a local branch with a PR description. Later steps check those files and do every GitHub write with the role's App token, which is created only after the agent has exited. They refuse to post output that contains a secret's value. Only one run per issue happens at a time.
+
+**Models and limits.** The spec agent and the implementer both use Sonnet. The spec agent is capped at 20 turns and the implementer at 60, and the job has a time limit. A run that reaches its cap stops as it would at a blocking assumption. The product workflow sets the model, so I can move one issue to Opus by hand.
 
 ## Constraints
 
