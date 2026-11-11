@@ -149,7 +149,7 @@ jobs:
             if (text.includes(process.env.TOKEN)) problems.push("The transcript holds the OAuth token.");
             if (fs.readFileSync("probe/ok.txt", "utf8").trim() !== "ok") problems.push("The allowed write did not happen.");
             if (fs.existsSync(".github/workflows/probe.yml")) problems.push("The guard hook let a workflow file be written.");
-            // The runner rewrites the event file for each step, so only the agent can see whether it was gone.
+            // run-agent refuses to start while the event file exists. This shows what the agent itself saw.
             const parts = events.flatMap(event => event.message?.content ?? []);
             const resultOf = command => {
               const use = parts.find(part => part.type === "tool_use" && part.name === "Bash" && part.input?.command?.startsWith(command));
@@ -164,5 +164,5 @@ jobs:
             if (!refused && !listed.includes("No such file")) problems.push("The agent could see the event payload file.");
             for (const problem of problems) console.log(`::error::${problem}`);
             if (problems.length > 0) process.exit(1);
-            console.log(`The fence held: ${denied.length} refusal(s), allowed write and Bash worked, event file gone during the run.`);
+            console.log(`The fence held: ${denied.length} refusal(s), allowed write and Bash worked, event file unseen.`);
           '
