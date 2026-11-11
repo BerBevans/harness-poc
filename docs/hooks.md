@@ -14,7 +14,7 @@ The guard runs five rules in order and denies on the first match:
 
 - **claude-config:** writes under `~/.claude` (except session data in `projects/`, `plans/` and `todos/`) or to `~/.claude.json`, any mention of `disableAllHooks`, and `claude plugin|config|mcp`. Claude Code applies settings changes mid-session, so this protects the hooks themselves.
 - **guardrail-files:** changes to the guardrail files listed in the decisions doc, by file tool or by a shell command that writes to them, plus `dotnet new` templates that create them, `dotnet add package` and `dotnet tool install`. In an architecture session, which the owner starts with `FACTORY_ARCHITECTURE_SESSION=1`, the rule lets `*.ArchitectureTests` folders through and still blocks every other guardrail, including guardrail files inside those folders. A factory run (`FACTORY_ISSUE` set) never gets the exemption, and the CI path check ignores the variable.
-- **secrets:** any access, reads included, to `.env` files, keys and certificates, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gh`, .NET user secrets and git credentials, plus `gh auth token` and `dotnet user-secrets`.
+- **secrets:** any access, reads included, to `.env` files, keys and certificates, `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gh`, .NET user secrets, git credentials, `/proc`, `/dev/fd`, any `environ` file and the runner's `_github_workflow` folder (the event payload, with every comment on the issue), plus `gh auth token`, `dotnet user-secrets`, `git --no-index` (it reads files outside the repo), commands that print the whole environment (`printenv`, a bare `env`, `export -p`, `set`, `declare -x`, PowerShell's `env:` drive) and any mention of the Claude token, `GITHUB_EVENT_PATH` or the Actions token variables.
 - **suppressions:** new suppressions in C# and new weakening properties in project files. Added text is compared with removed text, so moving existing code is allowed. Generated code is exempt. The rule lists are exported for CI's suppression scan.
 - **destructive-git:** force pushes, pushes to `main` or `master`, deleting remote branches, `reset --hard`, `clean -f`, `checkout .`, `restore .`, `branch -D`, history rewriting and `gh pr merge`.
 
@@ -42,7 +42,7 @@ The guard matches text. It can't see what a command will do, only how it's spelt
 | Encoded content | A suppression written via base64 | CI diff scan; skipped-test check on test results |
 | Patches | `git apply` of a patch touching a guardrail | CI path check |
 | Commits made outside Bash and PowerShell | A script that commits | Build fails on IDE0055 |
-| Printing secrets from the environment | `printenv` | No secrets in public repos; GitHub push protection |
+| Reading the environment from code | `node -e "console.log(process.env)"`, or a test that prints it | `run-agent`'s deny list and event file removal; output checked for secrets before posting; GitHub push protection |
 | Deleting tests | Removing a test method in a refactor | Coverage ratchet in CI; the reviewer agent checks deleted tests |
 
 ## CI checks for product repos
