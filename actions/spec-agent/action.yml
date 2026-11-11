@@ -1,0 +1,85 @@
+name: Spec agent
+description: >
+  Runs one spec agent round on an issue. Call it from a workflow triggered by issues (labeled) and
+  issue_comment (created), with a concurrency group per issue and permissions of contents read and
+  issues read; don't check the repo out first, because this action does, without credentials. Only
+  the owner can start a round, and the agent reads only the owner's and the spec App's text. The
+  agent holds no GitHub token: after it exits, the spec App's token is created and the checked
+  output replaces the issue body and is posted as a comment.
+
+inputs:
+  owner-user-ids:
+    description: Numeric GitHub user IDs who can start a round, comma-separated. Usually just the repo owner.
+    required: true
+  app-slug:
+    description: The spec App's slug, such as berbevans-factory-spec, so its own comments are recognised.
+    required: true
+  app-client-id:
+    description: The spec App's Client ID. It needs Issues read and write on this repo.
+    required: true
+  app-private-key:
+    description: The spec App's private key.
+    required: true
+  claude-code-oauth-token:
+    description: Token from claude setup-token, so usage stays within the subscription.
+    required: true
+  model:
+    description: The model for the round.
+    default: sonnet
+  max-turns:
+    description: The most turns the round may take. A round that reaches it posts a failure comment.
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Decide whether to start a round
+      id: trigger
+      shell: bash
+      env:
+        OWNER_USER_IDS: ${{ inputs.owner-user-ids }}
+        APP_LOGIN: ${{ inputs.app-slug }}[bot]
+        GITHUB_TOKEN: ${{ github.token }}
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/factory-trigger.mjs" spec .factory/run/input.md
+
+    - name: Run the spec agent
+      id: agent
+      if: steps.trigger.outputs.run == 'true'
+      continue-on-error: true
+      shell: bash
+      env:
+        AGENT_MODEL: ${{ inputs.model }}
+        AGENT_MAX_TURNS: ${{ inputs.max-turns }}
+        AGENT_ALLOWED_TOOLS: |
+          Read(./**)
+          Edit(./.factory/run/**)
+        CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
+        FACTORY_ISSUE: ${{ steps.trigger.outputs.issue }}
+      run: |
+        plugin="$(cd "$GITHUB_ACTION_PATH/../../plugins/factory-harness" && pwd)"
+        AGENT_PROMPT="$(cat "$plugin/prompts/spec-agent.md")" PLUGIN_DIR="$plugin" \
+          node "$plugin/ci/run-agent.mjs" "$RUNNER_TEMP/agent/tool" "$RUNNER_TEMP/agent/transcript.jsonl"
+
+    # Created only now, after the agent has exited, and limited to writing issues.
+    - name: Create the spec App's token
+      id: token
+      if: steps.trigger.outputs.run == 'true'
+      uses: actions/create-github-app-token@v3
+      with:
+        client-id: ${{ inputs.app-client-id }}
+        private-key: ${{ inputs.app-private-key }}
+        permission-issues: write
+
+    - name: Check and post the round
+      if: steps.trigger.outputs.run == 'true'
+      shell: bash
+      env:
+        AGENT_OUTCOME: ${{ steps.agent.outcome }}
+        ISSUE_NUMBER: ${{ steps.trigger.outputs.issue }}
+        SECRET_VALUES: ${{ inputs.claude-code-oauth-token }}
+        GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/spec-post.mjs" .factory/run

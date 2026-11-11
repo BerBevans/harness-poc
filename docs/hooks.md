@@ -183,14 +183,64 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
     prompt: <the agent's prompt>
     claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     issue: ${{ github.event.issue.number }}
+    max-turns: 20
+    allowed-tools: |
+      Read(./**)
+      Edit(./.factory/run/**)
 ```
 
 - **The plugin comes from the action's own copy of the harness.** GitHub downloads the whole harness at the tag in `uses:`, so the plugin is the version you pinned, written once. A reusable workflow can't see which ref it was called at, so it would need the tag repeated as an input, and the two could drift apart.
 - **It installs Claude Code at a pinned version,** `CLAUDE_CODE_VERSION` in `ci/run-agent.mjs`, so an upstream change can't silently change how agents run or authenticate. Upgrading is a harness release, as for Stryker.
 - **It checks that the plugin loaded.** The first event in the stream, `system/init`, lists the loaded plugins with their paths. The run is killed and the job fails unless `factory-harness` loaded from the action's folder and `plugin_errors` is empty or absent. The kill races the agent in principle, but `init` arrives before the first request to the model.
 - **The transcript stays out of the job log,** which is public on a public repo. The stream goes to the file in the action's `transcript` output, and the log gets a summary: the plugin check, the result, turns and duration. Upload the file somewhere private, never as a workflow artifact.
+- **The agent's tools are fenced.** It runs in `dontAsk` mode, so a tool call the role's `allowed-tools` don't allow is refused. A file tool or Bash with no path or command is rejected. A fixed deny list in `ci/run-agent.mjs`, which callers can't change, refuses reads and edits of `/proc`, `/sys`, `/dev`, `/run`, `/etc`, the home dotfiles, the runner's temp folder and the plugin folder. Read-only commands such as `ls`, `cat` and `grep` inside the checkout still run without being allowed, under the same path checks. `max-turns` caps the run.
+- **The event payload file is deleted before the agent starts,** because it holds every comment on the issue. Later steps must read event data from the `github` context.
+- **Check out with `persist-credentials: false`, and set no token in the job's `env`.** Otherwise the agent can read the token from `.git/config` or its environment.
 - **`issue` becomes `FACTORY_ISSUE`,** so a hook that blocks the agent tells it to comment on that issue and write a progress note.
 - **It doesn't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
 - **The token** comes from `claude setup-token`, lasts a year and is stored as the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. CI usage counts against the same subscription allowance as interactive sessions.
 
 Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--plugin-dir` did, and a headless attempt to edit `.editorconfig` was blocked by the guard hook. The action's script was tested with 2.1.310: a missing plugin folder was killed at `init` with no request to the model, and a run with the plugin loaded passed. The action was run on GitHub with 2.1.310 on 2026-10-25 by the hand-started `Run-agent check` workflow: called by its remote path, it loaded the plugin from GitHub's actions folder and a Haiku run passed; with `plugin.json` corrupted, the run was killed at `init` with one plugin error and no result.
+
+The fence was run on GitHub on 2026-11-11 by the `fence-holds` job in `Run-agent check`: reads of decoys in the runner temp folder, outside the checkout and in `~/.gitconfig`, and of `/proc/self/environ`, were all refused, an allowed write and `Bash(git status *)` worked, and the guard hook still blocked a workflow file write.
+
+## The spec agent
+
+The `spec-agent` action runs one round of spec refinement on an issue: the trigger check, the agent, then the posting, with the spec App's token created only after the agent has exited.
+
+```yaml
+name: Spec
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: spec-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: <owner>/harness-poc/actions/spec-agent@v0.11.0
+        with:
+          owner-user-ids: <your numeric user ID>
+          app-slug: <the spec App's slug>
+          app-client-id: ${{ vars.SPEC_APP_CLIENT_ID }}
+          app-private-key: ${{ secrets.SPEC_APP_PRIVATE_KEY }}
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+- **Only the owner starts a round,** by applying `needs-spec` or commenting on an issue that has it, and only on an issue the owner opened. Other events end the job with the reason in the log.
+- **The agent reads only trusted text:** `ci/factory-trigger.mjs` builds `.factory/run/input.md` from the API, with the comments by the owner and the spec App, and says how many others it left out.
+- **Its instructions are `prompts/spec-agent.md`,** sent as the prompt, because the deny list keeps the agent out of the plugin folder. It may write only under `.factory/run/`.
+- **`ci/spec-post.mjs` checks the files before posting:** exactly the expected files, a valid outcome, size limits, and no secret value or credential shape. Then it replaces the body with the spec and keeps the original request below it in a collapsed section, carried between rounds by the script. A failed run, a run that reaches its turn cap or a failed check leaves the body alone and posts a failure comment.
+- **The spec App needs Issues read and write.** The action asks its token for issues write only.

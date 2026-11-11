@@ -169,9 +169,11 @@ await runIfMain(import.meta.url, async env => {
   if (!env.PLUGIN_DIR) throw new Error('PLUGIN_DIR is empty.');
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is empty, so the run would fall back to other credentials or fail.');
   if (!env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is empty, so the deny list can\'t fence the runner\'s temp folder.');
-  // The action deletes it first. The runner only rewrites it between steps, so it stays gone for the run.
-  if (env.GITHUB_EVENT_PATH && fs.existsSync(env.GITHUB_EVENT_PATH)) {
-    throw new Error('The event payload file still exists, and it holds every comment on the issue. Delete it before the agent starts.');
+  // The event payload holds every comment on the issue, strangers' included, so the agent never sees
+  // it. The runner only rewrites it between steps, so it stays gone for the run.
+  if (env.GITHUB_EVENT_PATH) {
+    fs.rmSync(env.GITHUB_EVENT_PATH, { force: true });
+    if (fs.existsSync(env.GITHUB_EVENT_PATH)) throw new Error('The event payload file could not be deleted, so the agent can\'t start.');
   }
 
   const command = installClaudeCode(toolDir);
