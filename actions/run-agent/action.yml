@@ -4,7 +4,8 @@ description: >
   copy of the harness, so the plugin is the version the caller pinned in `uses:`. Installs a pinned
   Claude Code, authenticates with a claude setup-token OAuth token, and fails the run at startup
   unless the plugin loaded. The transcript goes to a file, not the job log, which is public on a
-  public repo.
+  public repo. Deletes the event payload file before the agent starts, because it holds every
+  comment on the issue: later steps must read event data from the github context instead.
 
 inputs:
   prompt:
@@ -21,6 +22,16 @@ inputs:
   model:
     description: The model to use. Leave empty for Claude Code's default.
     default: ''
+  max-turns:
+    description: The most turns the agent may take before the run stops.
+    required: true
+  allowed-tools:
+    description: >
+      The role's permission rules, one per line, such as Read(./**) or Bash(dotnet test *). The run
+      is in dontAsk mode, so anything else is refused. A file tool or Bash with no path or command
+      is rejected. A fixed deny list, which callers can't change, fences the file tools away from
+      /proc, the runner's temp folder, home dotfiles and the plugin.
+    required: true
 
 outputs:
   transcript:
@@ -36,9 +47,13 @@ runs:
       env:
         AGENT_PROMPT: ${{ inputs.prompt }}
         AGENT_MODEL: ${{ inputs.model }}
+        AGENT_MAX_TURNS: ${{ inputs.max-turns }}
+        AGENT_ALLOWED_TOOLS: ${{ inputs.allowed-tools }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         FACTORY_ISSUE: ${{ inputs.issue }}
       run: |
+        # The payload has every comment on the issue, strangers' included, so the agent never sees it.
+        rm -f "$GITHUB_EVENT_PATH"
         harness="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
         transcript="$RUNNER_TEMP/agent/transcript.jsonl"
         echo "transcript=$transcript" >> "$GITHUB_OUTPUT"
