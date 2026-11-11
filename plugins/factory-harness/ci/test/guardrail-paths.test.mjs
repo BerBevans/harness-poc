@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, guardrailPathsTouched, run } from '../guardrail-paths.mjs';
+import { evaluate, guardrailPathsTouched, localSettingsCommitted, run } from '../guardrail-paths.mjs';
 import { changed, fakeApi, GUARDRAIL_EXAMPLES, ORDINARY_EXAMPLES } from './helpers.mjs';
 
 const OWNER = { login: 'owner', id: 1001, type: 'User' };
@@ -105,4 +105,43 @@ test('run refuses to start without an exempt list', async () => {
   await assert.rejects(
     run({ env: actionsEnv({ EXEMPT_USER_IDS: '' }), readEvent: prEvent(AGENT, 1), fetchImpl: fakeApi([]).fetchImpl }),
     /EXEMPT_USER_IDS is empty/);
+});
+
+test('a local settings file is caught at any depth and in any casing', () => {
+  const paths = ['.claude/settings.local.json', 'src/App/.claude/Settings.Local.JSON', 'settings.local.json'];
+  assert.deepEqual(localSettingsCommitted(changed(...paths)), paths);
+});
+
+test('similar names are not local settings files', () => {
+  const paths = ['.claude/settings.json', 'src/App/appsettings.local.json', 'docs/settings.local.json.md'];
+  assert.deepEqual(localSettingsCommitted(changed(...paths)), []);
+});
+
+test('a local settings file renamed away counts under its old name, since its content moves', () => {
+  const files = [{ filename: 'notes/config.json', previous_filename: '.claude/settings.local.json', status: 'renamed' }];
+  assert.deepEqual(localSettingsCommitted(files), ['.claude/settings.local.json']);
+});
+
+test('the owner may delete a local settings file, so a leak can be cleaned up', () => {
+  const files = [{ filename: '.claude/settings.local.json', status: 'removed' }];
+  assert.equal(check(OWNER, files).passed, true);
+  // .claude/ is a guardrail folder, so an agent's deletion still fails as a guardrail change.
+  assert.match(check(AGENT, files).lines[0], /is a guardrail file/);
+});
+
+test('nobody is exempt from the local settings rule, the owner and Dependabot included', () => {
+  for (const author of [OWNER, DEPENDABOT, AGENT]) {
+    const result = check(author, changed('src/a.cs', '.claude/settings.local.json'));
+    assert.equal(result.passed, false, author.login);
+    assert.deepEqual(result.lines, [
+      "::error file=.claude/settings.local.json::.claude/settings.local.json is Claude Code's local settings file.",
+      'A settings.local.json file must never be committed: it can hold secrets. Remove it from the PR, ' +
+        'add it to .gitignore, and rotate any secret it held. Nobody is exempt from this rule.',
+    ]);
+  }
+});
+
+test('an exempt author still fails closed when not every changed file was listed', () => {
+  const result = evaluate({ author: OWNER, files: changed('src/a.cs'), changedFileCount: 3500, exemptUserIds: [OWNER.id] });
+  assert.equal(result.passed, false);
 });
