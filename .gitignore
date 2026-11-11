@@ -7,3 +7,6 @@ TestResults/
 
 # Local session notes, loaded automatically by Claude Code.
 CLAUDE.local.md
+
+# Claude Code local settings: approved commands can hold secrets in plain text.
+**/.claude/settings.local.json

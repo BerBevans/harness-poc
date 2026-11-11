@@ -1,9 +1,10 @@
 name: Guardrail path check
 description: >
   Fails a PR that changes a guardrail file, unless its author is exempt (the listed people and
-  Dependabot). Call it from a workflow triggered by pull_request_target; it refuses any other
-  event, because on pull_request a PR could change the workflow that runs it. It reads the
-  changed files from the GitHub API and never checks out or runs the PR's code.
+  Dependabot), and fails any PR, from anyone, that commits a Claude Code settings.local.json.
+  Call it from a workflow triggered by pull_request_target; it refuses any other event, because
+  on pull_request a PR could change the workflow that runs it. It reads the changed files from
+  the GitHub API and never checks out or runs the PR's code.
 
 inputs:
   exempt-user-ids:
