@@ -56,7 +56,7 @@ The implementer behaves like a senior developer: it states its interpretation an
 - **Non-blocking assumptions** are everything else. The implementer proceeds and records them in the PR.
 - **A stop partway through** means committing work in progress and a progress note in `.factory/progress.md`, so the resumed run doesn't start from scratch.
 - **Answers** are written back into the spec, not left only in the comment thread.
-- **A change that outgrows its spec:** past about 250 changed lines, the implementer stops as it would at a blocking assumption, and the issue is split.
+- **A change that outgrows its spec:** counted as the PR size check counts, above 250 changed lines the implementer carries on and says so in the PR. At 280 it stops as it would at a blocking assumption: it opens the PR as a draft, comments the count and what's left, and the issue is split. The 20 lines below the 300 limit leave room for the last commit and test fixes. Specs still aim at 250, because estimates have come in low.
 
 Work resumes only when I re-apply the `ready` label. A reply comment alone doesn't restart it, because a clarification may take several rounds.
 
