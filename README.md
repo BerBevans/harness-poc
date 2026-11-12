@@ -14,7 +14,7 @@ The central, human-owned part of a personal software factory: the guardrails eve
 Install in a product repo:
 
 ```sh
-claude plugin marketplace add <owner>/harness-poc#v0.12.1 --scope project
+claude plugin marketplace add <owner>/harness-poc#v0.12.2 --scope project
 claude plugin install factory-harness@factory-harness --scope project
 ```
 
