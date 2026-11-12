@@ -17,6 +17,8 @@ export const OUTCOMES = ['questions', 'complete', 'split'];
 const AGENT_FILES = ['input.md', 'spec.md', 'comment.md', 'outcome.json'];
 const MAX_SPEC = 50000;
 const MAX_COMMENT = 4000;
+// The PR size target. A spec estimated above it can't be complete: it must be split instead.
+export const MAX_COMPLETE_LINES = 250;
 const START = '<!-- factory:original-request -->';
 const END = '<!-- /factory:original-request -->';
 
@@ -51,6 +53,9 @@ export function readOutputs(dir, secretValues) {
   }
   if (!OUTCOMES.includes(parsed?.outcome)) return { problem: `the outcome "${parsed?.outcome}" isn't one of ${OUTCOMES.join(', ')}` };
   if (!Number.isInteger(parsed.estimatedLines) || parsed.estimatedLines < 0) return { problem: 'the size estimate isn\'t a whole number' };
+  if (parsed.outcome === 'complete' && parsed.estimatedLines > MAX_COMPLETE_LINES) {
+    return { problem: `it marked the spec complete at about ${parsed.estimatedLines} lines, over the ${MAX_COMPLETE_LINES}-line target, so the outcome must be split` };
+  }
 
   const spec = read('spec.md').trim();
   const comment = read('comment.md').trim();
