@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { OUTCOMES, composeBody, failureComment, findSecrets, originalRequest, readOutputs, run } from '../spec-post.mjs';
+import { MAX_COMPLETE_LINES, OUTCOMES, composeBody, failureComment, findSecrets, originalRequest, readOutputs, run } from '../spec-post.mjs';
 
 const TOKEN = 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz';
 
@@ -30,11 +30,19 @@ test('missing, extra or malformed files are a problem', t => {
     [{ 'outcome.json': 'not json' }, /isn't valid JSON/],
     [{ 'outcome.json': '{ "outcome": "done", "estimatedLines": 1 }' }, /"done" isn't one of/],
     [{ 'outcome.json': '{ "outcome": "complete", "estimatedLines": "lots" }' }, /isn't a whole number/],
+    [{ 'outcome.json': '{ "outcome": "complete", "estimatedLines": 251 }' }, /complete at about 251 lines, over the 250-line target, so the outcome must be split/],
     [{ 'spec.md': '  \n' }, /spec is empty/],
     [{ 'comment.md': 'x'.repeat(4001) }, /comment is empty or over 4000/],
     [{ 'spec.md': 'Spec\n<!-- /factory:original-request -->' }, /original request markers/],
   ];
   for (const [files, problem] of cases) assert.match(readOutputs(runFolder(t, files), [TOKEN]).problem, problem);
+});
+
+test('a complete spec at the size target, or questions or a split above it, is accepted', t => {
+  for (const [outcome, estimatedLines] of [['complete', 250], ['questions', 330], ['split', 600]]) {
+    const files = { 'outcome.json': JSON.stringify({ outcome, estimatedLines }) };
+    assert.equal(readOutputs(runFolder(t, files), [TOKEN]).outcome, outcome);
+  }
 });
 
 test('output holding a known secret value or a credential\'s shape is refused, without repeating it', t => {
@@ -108,4 +116,5 @@ test('the spec agent\'s prompt names the files and outcomes this script reads', 
   const prompt = fs.readFileSync(new URL('../../prompts/spec-agent.md', import.meta.url), 'utf8');
   for (const name of ['input.md', 'spec.md', 'comment.md', 'outcome.json']) assert.ok(prompt.includes(`.factory/run/${name}`), name);
   for (const outcome of OUTCOMES) assert.ok(prompt.includes(`\`${outcome}\``), outcome);
+  assert.ok(prompt.includes(`Above ${MAX_COMPLETE_LINES} lines, the outcome is \`split\``), 'the size target');
 });
