@@ -11,3 +11,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Stay on the products' major version. A move to a new major is made by hand, with the
+    # product repos.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
