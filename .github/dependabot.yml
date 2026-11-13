@@ -1,4 +1,5 @@
-# Opens PRs when the GitHub Actions used in workflows have new versions.
+# Opens PRs when the GitHub Actions used in workflows, or the .NET SDK pinned in global.json,
+# have new versions.
 # CI runs on each PR, so a bump is tested before it's merged.
 version: 2
 updates:
@@ -6,3 +7,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
+    # Stay on the products' major version. A move to a new major is made by hand, with the
+    # product repos.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
