@@ -89,7 +89,7 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
     writeFile('src/Consumer.Adapters/Consumer.Adapters.csproj', project);
     writeFile('src/Consumer.Adapters/Store.cs',
       'namespace Consumer.Adapters;\n\npublic static class Store\n{\n    public static int Save(int value) => value + 1;\n}\n');
-    assert.equal(dotnet('sln', 'Consumer.slnx', 'add', 'src/Consumer.Adapters/Consumer.Adapters.csproj').status, 0);
+    assert.equal(dotnet('sln', 'Consumer.slnx', 'add', 'src/Consumer.Adapters/Consumer.Adapters.csproj', '--include-references', 'false').status, 0);
 
     const withoutIntegration = measureCoverage();
     assert.deepEqual(withoutIntegration.unmeasured.map(r => r.assemblyName), ['Consumer.Adapters']);
@@ -105,7 +105,7 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
       '    [Fact]', '    public void SavesNextValue() => Assert.Equal(2, Consumer.Adapters.Store.Save(1));', '',
       '    [Fact]', '    public void SignOfPositive() => Assert.Equal("positive", Sign.Of(1));', '}', '',
     ].join('\n'));
-    assert.equal(dotnet('sln', 'Consumer.slnx', 'add', 'tests/Consumer.IntegrationTests/Consumer.IntegrationTests.csproj').status, 0);
+    assert.equal(dotnet('sln', 'Consumer.slnx', 'add', 'tests/Consumer.IntegrationTests/Consumer.IntegrationTests.csproj', '--include-references', 'false').status, 0);
 
     const { figure, unmeasured } = measureCoverage();
     assert.deepEqual(unmeasured, []);
@@ -118,7 +118,7 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
     const project = fs.readFileSync(path.join(repo, 'src/Consumer/Consumer.csproj'), 'utf8');
     writeFile('src/Orphan/Orphan.csproj', project);
     writeFile('src/Orphan/Lonely.cs', 'namespace Orphan;\n\npublic static class Lonely\n{\n    public static int Twice(int value) => value * 2;\n}\n');
-    const added = dotnet('sln', 'Consumer.slnx', 'add', 'src/Orphan/Orphan.csproj');
+    const added = dotnet('sln', 'Consumer.slnx', 'add', 'src/Orphan/Orphan.csproj', '--include-references', 'false');
     assert.equal(added.status, 0, added.stdout + added.stderr);
 
     const result = unmeasuredResult(measureCoverage().unmeasured);

@@ -22,9 +22,11 @@ jobs:
         with:
           node-version: 24
 
+      # The SDK is pinned exactly in global.json, so a runner image that ships a newer SDK can't
+      # change the results. Dependabot moves the pin in its own PR.
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          global-json-file: global.json
 
       # The first dotnet command on a fresh runner runs a one-off setup that creates a shared
       # lock. Run it once here, because the test files run in parallel and race on it.

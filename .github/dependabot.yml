@@ -1,8 +1,13 @@
-# Opens PRs when the GitHub Actions used in workflows have new versions.
+# Opens PRs when the GitHub Actions used in workflows, or the .NET SDK pinned in global.json,
+# have new versions.
 # CI runs on each PR, so a bump is tested before it's merged.
 version: 2
 updates:
   - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: dotnet-sdk
     directory: /
     schedule:
       interval: weekly
