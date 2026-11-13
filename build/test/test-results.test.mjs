@@ -43,7 +43,7 @@ function addTestProject(name, files = {}) {
   const sampleProject = fs.readFileSync(path.join(repo, 'tests/Consumer.UnitTests/Consumer.UnitTests.csproj'), 'utf8');
   writeFile(`tests/${name}/${name}.csproj`, sampleProject);
   for (const [file, text] of Object.entries(files)) writeFile(`tests/${name}/${file}`, text);
-  const added = dotnet('sln', 'Consumer.slnx', 'add', `tests/${name}/${name}.csproj`);
+  const added = dotnet('sln', 'Consumer.slnx', 'add', `tests/${name}/${name}.csproj`, '--include-references', 'false');
   assert.equal(added.status, 0, added.stdout + added.stderr);
 }
 
