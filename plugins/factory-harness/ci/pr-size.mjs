@@ -4,12 +4,15 @@
 //
 // Whitespace doesn't count: blank lines are skipped, and within each hunk a removed line and an
 // added line that match once whitespace is stripped cancel out, so reindenting a block is free.
-// Generated files that a .NET repo commits are left out by name; nothing else is.
+// Generated files that a .NET repo commits are left out by name. The only other file left out is
+// the implementer's spec copy, and only while it matches the issue's current spec exactly, so it
+// can't hold anything else.
 
 import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
 import {
-  annotation, exemptResult, incompleteListing, isExempt, parseUserIds, runIfMain, runOnPullRequest,
+  annotation, exemptResult, getJson, incompleteListing, isExempt, parseUserIds, runIfMain, runOnPullRequest,
 } from './lib/pull-request.mjs';
+import { normaliseSpec, specFromBody } from './lib/spec-body.mjs';
 
 const CHECK_NAME = 'PR size check';
 export const OVERRIDE_LABEL = 'size-override';
@@ -34,7 +37,42 @@ export function isGenerated(filename) {
   return inMigrations && (name.endsWith('.Designer.cs') || name.endsWith('ModelSnapshot.cs'));
 }
 
-const stripWhitespace = line => line.replace(/\s+/g, '');
+const FACTORY_BRANCH = /^factory\/issue-(\d+)$/;
+
+/** The issue a factory branch in this repo works on, and its spec copy's path pattern; else null. */
+export function specCopyPattern(head, repository) {
+  const issue = FACTORY_BRANCH.exec(head?.ref ?? '')?.[1];
+  if (!issue || head.repo?.full_name !== repository) return null;
+  return { issue, pattern: new RegExp(`^docs/specs/${issue}-[a-z0-9-]+\\.md$`) };
+}
+
+// An added file's patch is one hunk holding the whole file, every line prefixed with "+".
+function addedFileText(patch) {
+  const lines = patch.split('\n');
+  if (!lines[0].startsWith('@@') || lines.slice(1).some(line => line.startsWith('@@'))) return null;
+  return lines.slice(1).filter(line => line.startsWith('+')).map(line => line.slice(1)).join('\n');
+}
+
+/**
+ * The changed files that are the issue's spec copy, identical to the issue's current spec. The copy
+ * is new in every factory PR, since it reaches the target branch only when the PR merges, so its
+ * patch holds the whole file. A copy that already exists on the target branch counts.
+ */
+export async function findSpecCopies({ head, files, env, fetchImpl }) {
+  const copy = specCopyPattern(head, env.GITHUB_REPOSITORY);
+  const candidates = copy
+    ? files.filter(file => copy.pattern.test(file.filename) && file.status === 'added' && typeof file.patch === 'string')
+    : [];
+  if (candidates.length === 0) return [];
+  const issueUrl = `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/issues/${copy.issue}`;
+  const spec = specFromBody((await getJson(issueUrl, env.GITHUB_TOKEN, fetchImpl)).body);
+  if (spec === null) return [];
+  return candidates
+    .filter(file => { const text = addedFileText(file.patch); return text !== null && normaliseSpec(text) === spec; })
+    .map(file => file.filename);
+}
+
+const stripWhitespace = line =>line.replace(/\s+/g, '');
 
 // The length of the longest common subsequence of two lists of lines.
 function commonLength(a, b) {
@@ -67,13 +105,13 @@ export function countPatch(patch) {
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 /** Decides the check, before any override label. Returns { passed, lines }. */
-export function evaluate({ author, files, changedFileCount, exemptUserIds }) {
+export function evaluate({ author, files, changedFileCount, exemptUserIds, specCopies = [] }) {
   if (isExempt(author, exemptUserIds)) return exemptResult(author, CHECK_NAME);
   const incomplete = incompleteListing(files, changedFileCount);
   if (incomplete) return incomplete;
 
-  const counted = files.filter(file => !isGenerated(file.filename));
-  const generatedCount = files.length - counted.length;
+  const counted = files.filter(file => !isGenerated(file.filename) && !specCopies.includes(file.filename));
+  const generatedCount = files.filter(file => isGenerated(file.filename)).length;
 
   // A binary file has no patch and no line counts. A text file without a patch is one GitHub
   // considered too large to show, so it can't be counted.
@@ -94,7 +132,11 @@ export function evaluate({ author, files, changedFileCount, exemptUserIds }) {
     .sort((a, b) => b.lines - a.lines || a.filename.localeCompare(b.filename));
   const total = sizes.reduce((sum, size) => sum + size.lines, 0);
 
-  const excluded = generatedCount > 0 ? `, leaving out ${plural(generatedCount, 'generated file')}` : '';
+  const leftOut = [
+    ...(generatedCount > 0 ? [plural(generatedCount, 'generated file')] : []),
+    ...(specCopies.length > 0 ? ['the spec copy, which matches the issue'] : []),
+  ];
+  const excluded = leftOut.length > 0 ? `, leaving out ${leftOut.join(' and ')}` : '';
   const summary = `${plural(total, 'changed line')}, not counting whitespace${excluded}. ` +
     `The target is ${TARGET}, ${ACCEPTABLE} is acceptable and ${LIMIT} is the limit.`;
 
@@ -113,8 +155,10 @@ export async function run({ env, fetchImpl, ...options }) {
     env,
     fetchImpl,
     ...options,
-    evaluate: async ({ number, ...pullRequest }) => {
-      const result = evaluate(pullRequest);
+    evaluate: async ({ number, head, ...pullRequest }) => {
+      const specCopies = isExempt(pullRequest.author, pullRequest.exemptUserIds)
+        ? [] : await findSpecCopies({ head, files: pullRequest.files, env, fetchImpl });
+      const result = evaluate({ ...pullRequest, specCopies });
       if (result.passed) return result;
       const events = await fetchIssueEvents({
         apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number, token: env.GITHUB_TOKEN, fetchImpl,
