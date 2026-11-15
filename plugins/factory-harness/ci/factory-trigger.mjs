@@ -2,12 +2,15 @@
 //
 // Only the owner starts a run: by applying the role's label, or, for a role that takes replies, by
 // commenting on an issue that has the label. The input comes from the API at run time, not from the
-// event payload, and holds only text the owner or the role's App wrote, so nobody else's words reach
-// the agent. The issue must have been opened by the owner, since its author can edit its body.
+// event payload, and holds only text the owner or one of the factory's Apps wrote, so nobody else's
+// words reach the agent. Every factory App counts, not only the role's own, so the spec agent reads
+// the questions a blocked implementer asked. The issue must have been opened by the owner, since its
+// author can edit its body.
 //
 // Usage: node factory-trigger.mjs <role> <input file>
-// Environment: OWNER_USER_IDS, APP_LOGIN (such as berbevans-factory-spec[bot]), GITHUB_EVENT_NAME,
-// GITHUB_EVENT_PATH, GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_TOKEN (issues read), GITHUB_OUTPUT.
+// Environment: OWNER_USER_IDS, FACTORY_APP_SLUGS (comma-separated, such as berbevans-factory-spec),
+// GITHUB_EVENT_NAME, GITHUB_EVENT_PATH, GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_TOKEN (issues read),
+// GITHUB_OUTPUT.
 // Writes run=true and issue=<number> to GITHUB_OUTPUT when the run should start, else run=false.
 
 import fs from 'node:fs';
@@ -56,13 +59,32 @@ export function issueProblem({ role, issue, ownerUserIds }) {
   return null;
 }
 
-/** True for a comment the agent may read: the owner's, or the role's App's own. */
-export const isTrusted = (comment, { ownerUserIds, appLogin }) =>
-  ownerUserIds.includes(comment.user?.id) || (comment.user?.type === 'Bot' && comment.user?.login === appLogin);
+/** Parses the factory App slugs, comma-separated. Logins ending in [bot] are refused: slugs only. */
+export function parseAppSlugs(text) {
+  const slugs = String(text ?? '').split(/[\s,]+/).filter(Boolean);
+  if (slugs.length === 0) throw new Error('FACTORY_APP_SLUGS is empty, so the factory\'s own comments can\'t be recognised.');
+  const bad = slugs.find(slug => !/^[a-z0-9][a-z0-9-]*$/.test(slug));
+  if (bad) throw new Error(`FACTORY_APP_SLUGS must hold App slugs such as berbevans-factory-spec, not "${bad}".`);
+  return slugs;
+}
+
+/** The factory App slug that wrote the comment, or null for anyone else. */
+const factoryAppSlug = (comment, appSlugs) =>
+  comment.user?.type === 'Bot' ? appSlugs.find(slug => comment.user?.login === `${slug}[bot]`) ?? null : null;
+
+/** True for a comment the agent may read: the owner's, or one of the factory Apps'. */
+export const isTrusted = (comment, { ownerUserIds, appSlugs }) =>
+  ownerUserIds.includes(comment.user?.id) || factoryAppSlug(comment, appSlugs) !== null;
+
+/** The heading for a trusted comment: the owner, or the App's role, taken from the end of its slug. */
+function author(comment, appSlugs) {
+  const slug = factoryAppSlug(comment, appSlugs);
+  return slug ? `The ${slug.split('-').at(-1)} App (${slug})` : 'The owner';
+}
 
 /** The agent's input, as Markdown: the issue and the trusted comments, oldest first. */
-export function buildInput({ issue, comments, ownerUserIds, appLogin }) {
-  const trusted = comments.filter(comment => isTrusted(comment, { ownerUserIds, appLogin }));
+export function buildInput({ issue, comments, ownerUserIds, appSlugs }) {
+  const trusted = comments.filter(comment => isTrusted(comment, { ownerUserIds, appSlugs }));
   const left = comments.length - trusted.length;
   return [
     `# Issue #${issue.number}: ${issue.title}`,
@@ -72,7 +94,7 @@ export function buildInput({ issue, comments, ownerUserIds, appLogin }) {
     '## Comments',
     '',
     ...(trusted.length === 0 ? ['(No comments.)', ''] : trusted.flatMap(comment => [
-      `### ${comment.user.type === 'Bot' ? 'The factory' : 'The owner'}, ${comment.created_at}`, '', comment.body.trim(), '',
+      `### ${author(comment, appSlugs)}, ${comment.created_at}`, '', comment.body.trim(), '',
     ])),
     ...(left > 0 ? [`(${left} comment${left === 1 ? '' : 's'} by other people left out.)`, ''] : []),
   ].join('\n');
@@ -92,7 +114,7 @@ export async function fetchComments({ apiUrl, repository, number, token, fetchIm
 /** Decides, then builds the input file. Resolves to { passed, lines, outputs } for the action. */
 export async function run({ role, inputFile, env, fetchImpl = fetch, readEvent = file => JSON.parse(fs.readFileSync(file, 'utf8')) }) {
   const ownerUserIds = parseUserIds(env.OWNER_USER_IDS, 'OWNER_USER_IDS');
-  if (!env.APP_LOGIN) throw new Error('APP_LOGIN is empty, so the App\'s own comments can\'t be recognised.');
+  const appSlugs = parseAppSlugs(env.FACTORY_APP_SLUGS);
   const decision = decideTrigger({ role, eventName: env.GITHUB_EVENT_NAME, event: readEvent(env.GITHUB_EVENT_PATH), ownerUserIds });
   if (!decision.run) return { passed: true, lines: [`Not starting: ${decision.reason}`], outputs: { run: 'false' } };
 
@@ -104,7 +126,7 @@ export async function run({ role, inputFile, env, fetchImpl = fetch, readEvent =
 
   const comments = await fetchComments(api);
   fs.mkdirSync(path.dirname(inputFile), { recursive: true });
-  fs.writeFileSync(inputFile, buildInput({ issue, comments, ownerUserIds, appLogin: env.APP_LOGIN }));
+  fs.writeFileSync(inputFile, buildInput({ issue, comments, ownerUserIds, appSlugs }));
   return { passed: true, lines: [decision.reason], outputs: { run: 'true', issue: String(number) } };
 }
 
