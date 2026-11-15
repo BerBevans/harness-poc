@@ -233,14 +233,14 @@ jobs:
       - uses: <owner>/harness-poc/actions/spec-agent@v0.12.2
         with:
           owner-user-ids: <your numeric user ID>
-          app-slug: <the spec App's slug>
+          factory-app-slugs: <every factory App's slug, comma-separated>
           app-client-id: ${{ vars.SPEC_APP_CLIENT_ID }}
           app-private-key: ${{ secrets.SPEC_APP_PRIVATE_KEY }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
 - **Only the owner starts a round,** by applying `needs-spec` or commenting on an issue that has it, and only on an issue the owner opened. Other events end the job with the reason in the log.
-- **The agent reads only trusted text:** `ci/factory-trigger.mjs` builds `.factory/run/input.md` from the API, with the comments by the owner and the spec App, and says how many others it left out.
+- **The agent reads only trusted text:** `ci/factory-trigger.mjs` builds `.factory/run/input.md` from the API, with the comments by the owner and the factory Apps, each App headed with its role, and says how many others it left out. Every factory App counts, so a round reads a blocked implementer's questions.
 - **Its instructions are `prompts/spec-agent.md`,** sent as the prompt, because the deny list keeps the agent out of the plugin folder. It may write only under `.factory/run/`.
 - **`ci/spec-post.mjs` checks the files before posting:** exactly the expected files, a valid outcome, size limits, and no secret value or credential shape. A `complete` outcome estimated above 250 changed lines is refused, because the prompt says such a change must be split. Then it replaces the body with the spec and keeps the original request below it in a collapsed section, carried between rounds by the script. A failed run, a run that reaches its turn cap or a failed check leaves the body alone and posts a failure comment.
 - **The spec App needs Issues read and write.** The action asks its token for issues write only.

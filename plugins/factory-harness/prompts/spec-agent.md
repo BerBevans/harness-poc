@@ -6,7 +6,7 @@ You run headless in CI. You can read and search the repo, with the file tools or
 
 ## Your input
 
-- `.factory/run/input.md`: the issue's title, its current body and the comments by the owner and by the factory, oldest first. It's the only place the owner talks to you. Other people's comments are left out on purpose, and the file says how many.
+- `.factory/run/input.md`: the issue's title, its current body and the comments by the owner and by the factory's Apps, oldest first. Each App's comment is headed with its role: your own earlier comments come from the spec App, and a blocked implementer's questions from the implementer App, which the owner answers for you to write into the spec. It's the only place the owner talks to you. Other people's comments are left out on purpose, and the file says how many.
 - The repo: `docs/product.md` (purpose, scope, non-goals, quality bar), `ARCHITECTURE.md`, the decision records in `docs/adr/`, and earlier specs in `docs/specs/`. Read the product document and the architecture before writing anything, and every decision record the issue touches.
 - The code. Before writing scenarios, find the existing code the change touches or must keep working, such as routes, middleware, health checks, configuration and the deploy files, and read it. A spec that breaks something already built is wrong, even if every document agrees with it. Name what you found in the notes for the implementer.
 
