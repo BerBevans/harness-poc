@@ -43,7 +43,7 @@ GitHub Issues are the factory's intake. The spec author and the implementer are 
 2. Decide at spec time which scenarios are visible to the implementer and which are holdouts. Holdout drafts never go in the issue. Until the test agent and the holdout job exist, every scenario is visible.
 3. **One issue, one PR.** The spec agent estimates the change's size. If it won't fit in about 250 changed lines, it proposes a split into smaller issues and stops, and I create them. The 300-line limit stays while I review the code.
 4. Apply the `ready` label as the Definition of Ready. It removes `needs-spec` and starts the implementer, either automatically through an Action or manually.
-5. The implementer's first commit copies the spec into `docs/specs/`, so the spec and code merge in the same PR. The issue stays the conversation; the repo is the record.
+5. Before the implementer starts, the workflow commits the spec, the issue body above the original request, to `docs/specs/<issue>-<slug>.md`, so the spec and code merge in the same PR. A resumed run rewrites it from the current body, so answers written into the spec reach the repo. The issue stays the conversation; the repo is the record.
 
 Only I can start a run. The workflow checks who applied the label or wrote the comment, as the override labels do.
 
@@ -51,14 +51,15 @@ Only I can start a run. The workflow checks who applied the label or wrote the c
 
 The implementer behaves like a senior developer: it states its interpretation and assumptions for review instead of asking open-ended questions.
 
-- **First step, before any code:** read the spec and post an issue comment with its interpretation and numbered assumptions, so replies can be as short as "1 and 3 fine, 2 wrong: should be X".
-- **Blocking assumptions** change user-visible behaviour, the data model or persistence, or are hard to reverse. The implementer stops and waits.
-- **Non-blocking assumptions** are everything else. The implementer proceeds and records them in the PR.
+- **Interpretation is settled in the spec rounds.** The spec agent states its interpretation and numbered assumptions, so replies can be as short as "1 and 3 fine, 2 wrong: should be X". The implementer posts nothing while it runs; the workflow posts once it has exited.
+- **Blocking assumptions** change user-visible behaviour, the data model or persistence, or are hard to reverse. The implementer ends the run as `blocked`, with numbered questions and a recommendation for each.
+- **Non-blocking assumptions** are everything else. The implementer proceeds and records them in the PR and its closing comment.
+- **Dependencies are checked first.** The implementer checks the code against the spec's "Depends on" issues before anything else. If what it relies on isn't there, it ends `blocked` at once, names the dependency and commits nothing. The prompt does this, not the workflow: a dependency marker with a trigger refusal was more machinery than one product needs.
 - **A stop partway through** means committing work in progress and a progress note in `.factory/progress.md`, so the resumed run doesn't start from scratch.
 - **Answers** are written back into the spec, not left only in the comment thread.
 - **A change that outgrows its spec:** counted as the PR size check counts, above 250 changed lines the implementer carries on and says so in the PR. At 280 it stops as it would at a blocking assumption: it opens the PR as a draft, comments the count and what's left, and the issue is split. The 20 lines below the 300 limit leave room for the last commit and test fixes. Specs still aim at 250, because estimates have come in low.
 
-Work resumes only when I re-apply the `ready` label. A reply comment alone doesn't restart it, because a clarification may take several rounds.
+Work resumes only when I re-apply the `ready` label. A reply comment alone doesn't restart it, because a clarification may take several rounds. **A `blocked` run is answered through the spec agent:** I reply to the questions and add `needs-spec`, the spec agent writes the answers into the spec, and then I put `ready` back. The spec stays the one place the decisions live. The trigger therefore accepts comments from every factory App, not only the role's own, so the spec agent sees the implementer's questions.
 
 ## Review and merge authority
 
@@ -78,7 +79,7 @@ The gate between phases is measured against my review comments, not PRs, over a 
 
 **PR size.** Aim for 200 changed lines; 250 is acceptable and 300 is a hard limit. Above the limit, a PR needs an override label with a justification, for changes that are large but still easy to review. The goal is coherent, reviewable PRs, not one change chopped into pieces to pass the check.
 
-Whitespace-only changes don't count towards the limit. The CI check accepts the override label only when I applied it, not an agent's App. The label is `size-override`. Only the generated files a .NET repo commits are left out of the count: `packages.lock.json`, and `*.Designer.cs` and `*ModelSnapshot.cs` inside a `Migrations/` folder. Everything else counts, docs included, because every excluded name is somewhere an agent could put bulk.
+Whitespace-only changes don't count towards the limit. The CI check accepts the override label only when I applied it, not an agent's App. The label is `size-override`. Only the generated files a .NET repo commits are left out of the count: `packages.lock.json`, and `*.Designer.cs` and `*ModelSnapshot.cs` inside a `Migrations/` folder. Everything else counts, docs included, because every excluded name is somewhere an agent could put bulk. The one other exclusion is the spec copy, `docs/specs/<issue>-<slug>.md` on a `factory/issue-<issue>` branch, and only while its content matches the issue's current spec exactly. The check reads the issue to compare. A copy that differs counts in full, so it can't hide bulk; without the exclusion a spec of about 80 lines would take a third of the budget.
 
 ## Security scanning
 
@@ -158,6 +159,7 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 - **Content stays redacted:** prompt and response content is left redacted, as it is by default.
 - **Transcripts are stored privately,** compressed in a Cloudflare R2 bucket on a personal account and expired after 30 days by a lifecycle rule, never as workflow artifacts on a public repo.
 - **Backend:** Grafana Cloud's free tier, with 14-day retention, for operational telemetry, plus a local Grafana LGTM container for experimenting. Long-term history comes from GitHub for pipeline facts, and from a daily cost and token summary written to R2.
+- **Agent telemetry comes first:** `run-agent` turns on Claude Code's OpenTelemetry export for every role, with the endpoint and headers as inputs, before the implementer runs for real. Metrics and events are on; prompts and tool content stay off. The workflow spans and the trace per issue follow.
 - **Scope:** the minimum is the trace per issue, the resource attributes and private transcripts. Dashboards come once there is data, and observability does not delay the hooks.
 
 ## Harness hooks
@@ -199,6 +201,21 @@ The factory is observed in two layers, joined by one trace per issue. This is wh
 **Agent runs in CI use the harness's `run-agent` action,** which loads the plugin with `--plugin-dir` from the action's own copy of the harness, so the pinned tag is written once. A reusable workflow can't see which ref it was called at, so it would need the tag repeated as an input. A headless run ignores marketplaces declared in the repository and drops the plugin without any error. The action therefore fails any run whose startup event doesn't list the plugin as loaded. Runs authenticate with a `claude setup-token` OAuth token, so usage stays within the subscription, and they don't use `--bare`, because bare mode ignores that token.
 
 **Agents work on files only.** An agent run holds no GitHub token: the checkout keeps no credentials, and the job's own token is read-only. The workflow builds the agent's input from the issue body and from comments by me and the role's App only, so nobody else's text reaches an agent. The agent writes its results to files: the spec and a comment, or commits on a local branch with a PR description. Later steps check those files and do every GitHub write with the role's App token, which is created only after the agent has exited. They refuse to post output that contains a secret's value. Only one run per issue happens at a time.
+
+**The implementer commits locally and the workflow pushes.** The agent commits in a checkout without credentials, so the format-on-commit hook runs and a stop partway is just a commit. After it exits, the workflow checks that the new commits sit only on top of the starting commit, with no rewritten history and no guardrail files, and only then creates the implementer App's token, pushes `factory/issue-<issue>`, opens or updates the PR and comments.
+
+**Every run ends in one of four ways,** written by the agent to `.factory/run/outcome.json`, `pr.md` and `comment.md`, as the spec agent does:
+
+- `done`: the PR is ready for review, and the comment summarises the change and the non-blocking assumptions.
+- `blocked`: a draft PR, and the comment asks the questions with recommendations.
+- `too-big`, at 280 changed lines: a draft PR, and the comment gives the count, what's done, what's left and a proposed split.
+- No valid outcome, or the turn cap reached: a draft PR if there are commits, and a fixed failure comment written by the workflow.
+
+`ready` is removed every time. On every ending but `done` the agent has committed `.factory/progress.md` for the resumed run. The workflow runs the tests once after the agent exits and turns a `done` with failing tests into a draft.
+
+**A resumed run merges `main` in.** If `factory/issue-<issue>` exists, the workflow checks it out and merges `origin/main` into it as a merge commit, so nothing is rewritten and the "only on top" check uses the merged head as its base. A conflict stops the run before the agent starts, with the fixed failure comment. The agent reads `.factory/progress.md` and the current spec.
+
+**The agent's code runs only in a container.** Compiled code gets past the text fence: a test could read `CLAUDE_CODE_OAUTH_TOKEN` from the environment or `/proc`. The implementer builds and tests only through a harness wrapper that runs `docker run --rm` on the SDK image pinned by digest to match `global.json`, with the repo mounted, no environment passed, no host `/proc`, and the network on for restore. `dotnet` itself is not an allowed command. The workflow's own test run uses the same wrapper, and the App token is created only after it.
 
 **Models and limits.** The spec agent and the implementer both use Sonnet. The spec agent is capped at 20 turns and the implementer at 60, and the job has a time limit. A run that reaches its cap stops as it would at a blocking assumption. The product workflow sets the model, so I can move one issue to Opus by hand.
 
