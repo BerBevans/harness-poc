@@ -17,3 +17,9 @@ Working notes for sessions in the harness repo. The design is `docs/decisions.md
 - Remove `needs-spec` before commenting on an issue you're closing or splitting.
 - Check each round's claims against the code before replying.
 - Reply to every point you want changed. The agent changes only what a reply addresses.
+
+## SDK updates
+
+- The local machine is arm64 WSL; CI, the VPS and agent runs are x86_64.
+- SDK 10.0.404's VSTest opens the test session folder with x86_64 `open()` flags, which mean `O_DIRECT` on arm64, so `dotnet test` with a collector exits 1 with errno 22 there (microsoft/vstest#16657, fixed on vstest `main` by #16656, not yet in an SDK). Locally, `VSTEST_DISABLE_ARTIFACTS_DIRECTORY_VERIFICATION=1` is set in `~/.profile` to get past it. Never set it in a repo or a workflow: the check works on x86_64 and should stay on there.
+- Whenever the SDK moves (a `global.json` bump, by hand or by Dependabot, in this repo or a product repo), test locally with the check back on: `env -u VSTEST_DISABLE_ARTIFACTS_DIRECTORY_VERIFICATION node --test "build/test/coverage.test.mjs"`. If it passes, remove the line from `~/.profile` and this item.
