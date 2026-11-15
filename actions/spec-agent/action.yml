@@ -3,7 +3,7 @@ description: >
   Runs one spec agent round on an issue. Call it from a workflow triggered by issues (labeled) and
   issue_comment (created), with a concurrency group per issue and permissions of contents read and
   issues read; don't check the repo out first, because this action does, without credentials. Only
-  the owner can start a round, and the agent reads only the owner's and the spec App's text. The
+  the owner can start a round, and the agent reads only the owner's and the factory Apps' text. The
   agent holds no GitHub token: after it exits, the spec App's token is created and the checked
   output replaces the issue body and is posted as a comment.
 
@@ -11,8 +11,10 @@ inputs:
   owner-user-ids:
     description: Numeric GitHub user IDs who can start a round, comma-separated. Usually just the repo owner.
     required: true
-  app-slug:
-    description: The spec App's slug, such as berbevans-factory-spec, so its own comments are recognised.
+  factory-app-slugs:
+    description: >
+      Every factory App's slug, comma-separated, such as berbevans-factory-spec. The agent reads these
+      Apps' comments, such as a blocked implementer's questions, and nobody else's but the owner's.
     required: true
   app-client-id:
     description: The spec App's Client ID. It needs Issues read and write on this repo.
@@ -42,7 +44,7 @@ runs:
       shell: bash
       env:
         OWNER_USER_IDS: ${{ inputs.owner-user-ids }}
-        APP_LOGIN: ${{ inputs.app-slug }}[bot]
+        FACTORY_APP_SLUGS: ${{ inputs.factory-app-slugs }}
         GITHUB_TOKEN: ${{ github.token }}
       run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/factory-trigger.mjs" spec .factory/run/input.md
 
