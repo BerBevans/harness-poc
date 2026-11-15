@@ -2,7 +2,8 @@ name: PR size
 description: >
   Fails a PR that changes more than 300 lines, added plus removed, unless its author is exempt (the
   listed people and Dependabot) or someone in override-user-ids applied the size-override label.
-  Whitespace-only changes and the generated files a .NET repo commits don't count. Call it from a
+  Whitespace-only changes, the generated files a .NET repo commits, and the implementer's spec copy
+  while it matches the issue's spec don't count. Call it from a
   workflow triggered by pull_request_target, including labeled and unlabeled; it refuses any other
   event. It reads the diff from the GitHub API and never checks out or runs the PR's code.
 
@@ -16,7 +17,9 @@ inputs:
       repo owner. Not logins, which can be renamed and then taken.
     required: true
   github-token:
-    description: Token used to read the PR's diff and issue events. Needs pull-requests read and issues read.
+    description: >
+      Token used to read the PR's diff, its issue events, and a factory branch's issue. Needs
+      pull-requests read and issues read.
     default: ${{ github.token }}
 
 runs:

@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getJson, runIfMain } from './lib/pull-request.mjs';
+import { composeBody as composeIssueBody, END, START } from './lib/spec-body.mjs';
 
 export const OUTCOMES = ['questions', 'complete', 'split'];
 const AGENT_FILES = ['input.md', 'spec.md', 'comment.md', 'outcome.json'];
@@ -19,8 +20,6 @@ const MAX_SPEC = 50000;
 const MAX_COMMENT = 4000;
 // The PR size target. A spec estimated above it can't be complete: it must be split instead.
 export const MAX_COMPLETE_LINES = 250;
-const START = '<!-- factory:original-request -->';
-const END = '<!-- /factory:original-request -->';
 
 // Shapes of common credentials, for secrets whose values this step doesn't know.
 const SECRET_SHAPES = [
@@ -77,10 +76,8 @@ export function originalRequest(currentBody) {
   return body.trim();
 }
 
-export function composeBody(spec, currentBody) {
-  const original = originalRequest(currentBody) || '(The issue had no description.)';
-  return `${spec}\n\n<details>\n<summary>Original request</summary>\n\n${START}\n${original}\n${END}\n</details>\n`;
-}
+export const composeBody = (spec, currentBody) =>
+  composeIssueBody(spec, originalRequest(currentBody) || '(The issue had no description.)');
 
 export const failureComment = problem =>
   `The spec agent's round didn't finish: ${problem}. The issue body is unchanged. ` +
