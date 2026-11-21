@@ -146,6 +146,9 @@ export function telemetryEnvironment(env) {
       ...clean,
       CLAUDE_CODE_ENABLE_TELEMETRY: '1',
       OTEL_METRICS_EXPORTER: 'otlp',
+      // Claude Code defaults to delta. Grafana Cloud accepts the request, keeps target_info and
+      // discards delta data points as otlp_parse_error, so no claude_code metric arrives.
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: 'cumulative',
       OTEL_LOGS_EXPORTER: 'otlp',
       OTEL_TRACES_EXPORTER: 'none',
       OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',

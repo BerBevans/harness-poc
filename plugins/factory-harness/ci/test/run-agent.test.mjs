@@ -166,6 +166,7 @@ test('with an endpoint, metrics and events go out over OTLP, with traces and eve
   const { env, summary } = telemetryEnvironment({ AGENT_OTEL_ENDPOINT: ENDPOINT, AGENT_OTEL_HEADERS: 'Authorization=Basic abc' });
   assert.equal(env.CLAUDE_CODE_ENABLE_TELEMETRY, '1');
   assert.equal(env.OTEL_METRICS_EXPORTER, 'otlp');
+  assert.equal(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE, 'cumulative');
   assert.equal(env.OTEL_LOGS_EXPORTER, 'otlp');
   assert.equal(env.OTEL_TRACES_EXPORTER, 'none');
   assert.equal(env.OTEL_EXPORTER_OTLP_ENDPOINT, ENDPOINT);
