@@ -31,7 +31,8 @@ if (mode === 'serve') {
   for (const signal of ['/v1/metrics', '/v1/logs']) {
     if (!paths.includes(signal)) fail(`No request reached ${signal}. Requests seen: ${paths.join(', ') || 'none'}.`);
   }
-  if (paths.includes('/v1/traces')) fail('A request reached /v1/traces, so trace export is on. run-agent must keep it off.');
+  const unexpected = paths.filter(path => !['/v1/metrics', '/v1/logs'].includes(path));
+  if (unexpected.length > 0) fail(`Requests reached ${[...new Set(unexpected)].join(', ')}, so traces or a beta export are on. run-agent must allow only metrics and logs.`);
   if (requests.some(request => request.authorization !== process.env.EXPECTED_AUTHORIZATION)) {
     fail('A request arrived without the expected Authorization header.');
   }
@@ -40,7 +41,7 @@ if (mode === 'serve') {
     if (!bodies.some(body => body.includes(text))) fail(`No request carried "${text}".`);
   }
   if (bodies.some(body => body.includes(process.env.CANARY))) fail('The prompt\'s canary word was exported, so content logging is on.');
-  console.log(`${requests.length} OTLP requests: ${[...new Set(paths)].join(', ')}, with the header and attributes, no traces and no prompt or response content.`);
+  console.log(`${requests.length} OTLP requests: ${[...new Set(paths)].join(', ')}, with the header and attributes, nothing else and no prompt or response content.`);
 } else {
   throw new Error('Usage: otlp-receiver.mjs serve|check <record file>');
 }

@@ -184,7 +184,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Set by the caller to prove run-agent overrides them: content must stay off whatever the job says.
+    # Traces and tool content need the beta flag, so it is on too. The beta endpoint points at the
+    # receiver on a path its check refuses, so a redirect it was meant to strip would fail the run.
     env:
+      CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1'
+      ENABLE_ENHANCED_TELEMETRY_BETA: '1'
+      ENABLE_BETA_TRACING_DETAILED: '1'
+      BETA_TRACING_ENDPOINT: http://127.0.0.1:4318/beta
       OTEL_LOG_USER_PROMPTS: '1'
       OTEL_LOG_TOOL_CONTENT: '1'
       OTEL_LOG_TOOL_DETAILS: '1'

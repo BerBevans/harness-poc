@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
+  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
 } from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
@@ -174,12 +174,13 @@ test('with an endpoint, metrics and events go out over OTLP, with traces and eve
 });
 
 test('a caller can\'t switch content logging or traces on through the job environment', () => {
-  const caller = { AGENT_OTEL_ENDPOINT: ENDPOINT, OTEL_TRACES_EXPORTER: 'otlp', CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1' };
-  for (const name of CONTENT_SWITCHES) caller[name] = '1';
+  const caller = { AGENT_OTEL_ENDPOINT: ENDPOINT, OTEL_TRACES_EXPORTER: 'otlp' };
+  for (const name of [...CONTENT_SWITCHES, ...TELEMETRY_SWITCHES]) caller[name] = '1';
+  caller.BETA_TRACING_ENDPOINT = 'http://elsewhere.example';
   const { env } = telemetryEnvironment(caller);
   for (const name of CONTENT_SWITCHES) assert.equal(env[name], '0', name);
   assert.equal(env.OTEL_TRACES_EXPORTER, 'none');
-  assert.equal(env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA, undefined);
+  for (const name of TELEMETRY_SWITCHES.filter(name => name !== 'CLAUDE_CODE_ENABLE_TELEMETRY')) assert.equal(env[name], undefined, name);
 });
 
 test('resource attributes name the role, model, issue and run, encoded, and skip what is unset', () => {
