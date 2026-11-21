@@ -104,6 +104,27 @@ export function resourceAttributes(env) {
 }
 
 /**
+ * OTLP headers with each name and value URL-decoded. The OpenTelemetry convention percent-encodes
+ * them (Authorization=Basic%20...), but Claude Code 2.1.310 sends them as given, so Grafana got
+ * "Basic%20..." and refused it. A value already decoded is unchanged. Never echoes the headers.
+ */
+export function decodeHeaders(headers) {
+  return headers.split(',').map(pair => pair.trim()).filter(Boolean).map(pair => {
+    const equals = pair.indexOf('=');
+    if (equals < 1) throw new Error('AGENT_OTEL_HEADERS must be name=value pairs, comma-separated.');
+    let decoded;
+    try {
+      decoded = `${decodeURIComponent(pair.slice(0, equals)).trim()}=${decodeURIComponent(pair.slice(equals + 1)).trim()}`;
+    } catch {
+      throw new Error('AGENT_OTEL_HEADERS holds a malformed percent-encoding.');
+    }
+    // Claude Code splits on commas without decoding, so a decoded comma would split a value.
+    if (decoded.includes(',')) throw new Error('AGENT_OTEL_HEADERS holds an encoded comma, which Claude Code can\'t send.');
+    return decoded;
+  }).join(',');
+}
+
+/**
  * The agent's environment: the caller's, with every telemetry setting replaced by the run's own.
  * Telemetry is off unless AGENT_OTEL_ENDPOINT is set. Returns { env, summary }.
  */
@@ -129,7 +150,7 @@ export function telemetryEnvironment(env) {
       OTEL_TRACES_EXPORTER: 'none',
       OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
       OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
-      ...(headers ? { OTEL_EXPORTER_OTLP_HEADERS: headers } : {}),
+      ...(headers ? { OTEL_EXPORTER_OTLP_HEADERS: decodeHeaders(headers) } : {}),
       OTEL_RESOURCE_ATTRIBUTES: resourceAttributes(env),
       ...Object.fromEntries(CONTENT_SWITCHES.map(name => [name, '0'])),
     },

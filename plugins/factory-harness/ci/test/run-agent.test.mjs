@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
+  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
 } from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
@@ -184,6 +184,20 @@ test('a caller can\'t switch content logging or traces on through the job enviro
   for (const name of CONTENT_SWITCHES) assert.equal(env[name], '0', name);
   assert.equal(env.OTEL_TRACES_EXPORTER, 'none');
   for (const name of TELEMETRY_SWITCHES.filter(name => name !== 'CLAUDE_CODE_ENABLE_TELEMETRY')) assert.equal(env[name], undefined, name);
+});
+
+test('OTLP headers are URL-decoded, since Claude Code sends them as given', () => {
+  assert.equal(decodeHeaders('Authorization=Basic%20Y2hlY2s='), 'Authorization=Basic Y2hlY2s=');
+  assert.equal(decodeHeaders('Authorization=Basic Y2hlY2s='), 'Authorization=Basic Y2hlY2s=', 'a decoded value is unchanged');
+  assert.equal(decodeHeaders('a=1, b = x%3Dy'), 'a=1,b=x=y');
+  const { env } = telemetryEnvironment({ AGENT_OTEL_ENDPOINT: ENDPOINT, AGENT_OTEL_HEADERS: 'Authorization=Basic%20abc' });
+  assert.equal(env.OTEL_EXPORTER_OTLP_HEADERS, 'Authorization=Basic abc');
+});
+
+test('malformed OTLP headers are refused without echoing them', () => {
+  for (const headers of ['Basic secret-token', '=secret-token', 'Authorization=Basic%2secret-token', 'Authorization=secret%2Ctoken']) {
+    assert.throws(() => decodeHeaders(headers), error => /AGENT_OTEL_HEADERS/.test(error.message) && !error.message.includes('secret'), headers);
+  }
 });
 
 test('resource attributes name the role, model, issue and run, encoded, and skip what is unset', () => {

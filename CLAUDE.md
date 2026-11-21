@@ -35,6 +35,7 @@ Run in a login shell so `~/.profile` applies. The build tests need .NET, and ins
 - Harness PRs keep to the 300-line limit by hand (this repo doesn't run the size check): added plus removed lines, blank ones left out.
 - The runner rewrites `$RUNNER_TEMP/_github_workflow/event.json` before every step, so `run-agent.mjs` deletes it in the agent's own step.
 - `Run-agent check` has a concurrency group that keeps one queued run. To run it repeatedly, start each run after the previous one finishes.
+- Claude Code (2.1.310) sends `OTEL_EXPORTER_OTLP_HEADERS` without URL-decoding, though it decodes `OTEL_RESOURCE_ATTRIBUTES`. `run-agent` decodes the headers, and the telemetry check job uses a `%20` header to prove it. A refused export fails silently.
 - `system/init` can be read for free: kill the process after the first line and no request reaches the model.
 - `plugin validate .` checks only `marketplace.json`; also run `plugin validate plugins/factory-harness`.
 - CODEOWNERS is case-sensitive; `isGuardrailPath` isn't. The template lists the casings .NET tools look for. A new guardrail goes in both `templates/CODEOWNERS.example` and the examples in `ci/test/helpers.mjs` (`codeowners-template.test.mjs` checks).

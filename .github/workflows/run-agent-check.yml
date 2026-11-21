@@ -229,7 +229,8 @@ jobs:
           max-turns: 3
           allowed-tools: Read(./**)
           otel-endpoint: http://127.0.0.1:4318
-          otel-headers: Authorization=Bearer check-header
+          # Percent-encoded with Base64 padding, as Grafana's guides write it: run-agent must decode it.
+          otel-headers: Authorization=Basic%20Y2hlY2s=
 
       # Without the canary in the reply, the receiver's check would pass whether response logging
       # is off or not, so prove the reply holds it. Reads the transcript without printing it.
@@ -251,7 +252,7 @@ jobs:
 
       - name: Check what reached the receiver
         env:
-          EXPECTED_AUTHORIZATION: Bearer check-header
+          EXPECTED_AUTHORIZATION: Basic Y2hlY2s=
           CANARY: ${{ steps.setup.outputs.canary }}
           EXPECTED_TEXT: |
             claude_code.token.usage
