@@ -4,7 +4,7 @@ Working notes for sessions in the harness repo. The design is `docs/decisions.md
 
 ## Releasing
 
-1. If the release changes `actions/run-agent` or `CLAUDE_CODE_VERSION`, rerun the `Run-agent check` workflow first.
+1. If the release changes `actions/run-agent` or `CLAUDE_CODE_VERSION`, rerun the `Run-agent check` workflow first. When `CLAUDE_CODE_VERSION` moves, first read the Claude Code monitoring docs (code.claude.com/docs/en/monitoring-usage) for telemetry variables that `TELEMETRY_SWITCHES` or `CONTENT_SWITCHES` in `ci/run-agent.mjs` don't list, including beta switches and aliases. Add any you find to the list and to the `telemetry-exports` job's env: the strip is a deny list, so a new variable gets through unnoticed.
 2. Open a release PR that moves every docs example to the coming tag. `ci/test/docs-tag.test.mjs` fails if the examples name an older tag than the newest, so never tag without this PR.
 3. Tag the release PR's merge commit with an annotated tag, and push the tag on its own:
    `git tag -a vX.Y.Z <merge commit> -m "vX.Y.Z: <what it brings>"`, then `git push origin vX.Y.Z`.
