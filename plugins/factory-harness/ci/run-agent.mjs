@@ -79,8 +79,14 @@ export const CONTENT_SWITCHES = [
   'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_RAW_API_BODIES',
 ];
 
-const isTelemetrySetting = name =>
-  name.startsWith('OTEL_') || ['CLAUDE_CODE_ENABLE_TELEMETRY', 'CLAUDE_CODE_ENHANCED_TELEMETRY_BETA'].includes(name);
+// Claude Code's own telemetry switches, beta ones and aliases included. BETA_TRACING_ENDPOINT would
+// send logs and traces somewhere other than the run's endpoint.
+export const TELEMETRY_SWITCHES = [
+  'CLAUDE_CODE_ENABLE_TELEMETRY', 'CLAUDE_CODE_ENHANCED_TELEMETRY_BETA', 'ENABLE_ENHANCED_TELEMETRY_BETA',
+  'ENABLE_BETA_TRACING_DETAILED', 'BETA_TRACING_ENDPOINT',
+];
+
+const isTelemetrySetting = name => name.startsWith('OTEL_') || TELEMETRY_SWITCHES.includes(name);
 
 /** OTEL_RESOURCE_ATTRIBUTES for the run, so metrics split by role, model, issue and workflow run. */
 export function resourceAttributes(env) {

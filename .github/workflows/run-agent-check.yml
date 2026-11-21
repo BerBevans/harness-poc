@@ -184,10 +184,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Set by the caller to prove run-agent overrides them: content must stay off whatever the job says.
+    # Traces and tool content need the beta flag, so it is on too. The beta endpoint points at the
+    # receiver on a path its check refuses, so a redirect it was meant to strip would fail the run.
     env:
+      CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1'
+      ENABLE_ENHANCED_TELEMETRY_BETA: '1'
+      ENABLE_BETA_TRACING_DETAILED: '1'
+      BETA_TRACING_ENDPOINT: http://127.0.0.1:4318/beta
       OTEL_LOG_USER_PROMPTS: '1'
       OTEL_LOG_TOOL_CONTENT: '1'
       OTEL_LOG_TOOL_DETAILS: '1'
+      OTEL_LOG_ASSISTANT_RESPONSES: '1'
+      OTEL_LOG_RAW_API_BODIES: '1'
       OTEL_TRACES_EXPORTER: otlp
     steps:
       - uses: actions/checkout@v7
@@ -198,8 +206,8 @@ jobs:
         with:
           node-version: 24
 
-      # The canary is in the prompt and in a file the agent reads, so prompt or tool content logging
-      # would both export it.
+      # The canary is in the prompt, in a file the agent reads and in the reply it asks for, so prompt,
+      # tool content, response or raw body logging would each export it.
       - name: Plant a canary and start a local OTLP receiver
         id: setup
         run: |
@@ -210,9 +218,11 @@ jobs:
           for attempt in $(seq 50); do test -f "$RUNNER_TEMP/otlp.jsonl.ready" && exit 0; sleep 0.1; done
           echo "::error::The OTLP receiver didn't start." && exit 1
 
-      - uses: ./actions/run-agent
+      - name: Run the agent with telemetry on
+        id: agent
+        uses: ./actions/run-agent
         with:
-          prompt: Use Read on canary.txt, then reply with the single word ready. Test marker ${{ steps.setup.outputs.canary }}.
+          prompt: Use Read on canary.txt, then reply with exactly the word it holds. Test marker ${{ steps.setup.outputs.canary }}.
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: haiku
           role: run-agent-check
@@ -220,6 +230,24 @@ jobs:
           allowed-tools: Read(./**)
           otel-endpoint: http://127.0.0.1:4318
           otel-headers: Authorization=Bearer check-header
+
+      # Without the canary in the reply, the receiver's check would pass whether response logging
+      # is off or not, so prove the reply holds it. Reads the transcript without printing it.
+      - name: Check the reply holds the canary
+        env:
+          TRANSCRIPT: ${{ steps.agent.outputs.transcript }}
+          CANARY: ${{ steps.setup.outputs.canary }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const events = fs.readFileSync(process.env.TRANSCRIPT, "utf8").trim().split("\n").map(line => JSON.parse(line));
+            const reply = events.find(event => event.type === "result")?.result;
+            if (typeof reply !== "string" || !reply.includes(process.env.CANARY)) {
+              console.log("::error::The reply did not hold the canary, so response logging went untested.");
+              process.exit(1);
+            }
+            console.log("The reply holds the canary.");
+          '
 
       - name: Check what reached the receiver
         env:

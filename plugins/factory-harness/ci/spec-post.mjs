@@ -6,8 +6,8 @@
 // it from round to round; the agent never writes it, so a round can't rewrite what was asked.
 //
 // Usage: node spec-post.mjs <run folder>
-// Environment: AGENT_OUTCOME (the agent step's outcome), ISSUE_NUMBER, SECRET_VALUES (one per line,
-// such as the Claude token), GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_TOKEN (the App's, issues write).
+// Environment: AGENT_OUTCOME (the agent step's outcome), ISSUE_NUMBER, SECRET_VALUES (one per line:
+// the Claude token, then the OTLP headers or an empty line), GITHUB_API_URL, GITHUB_REPOSITORY, GITHUB_TOKEN (the App's, issues write).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -36,6 +36,35 @@ const SECRET_SHAPES = [
 export function findSecrets(text, secretValues) {
   const found = secretValues.filter(value => value.length >= 8 && text.includes(value)).map(() => 'a secret value');
   return [...found, ...SECRET_SHAPES.filter(([, shape]) => shape.test(text)).map(([name]) => name)];
+}
+
+/**
+ * The secret values to look for: each line of SECRET_VALUES, plus, for an OTLP headers line
+ * (name=value pairs, comma-separated, URL-encoded), each header value, its credential without the
+ * scheme and, when that is Base64 of user:password, the decoded pair and the password.
+ */
+export function knownSecrets(raw) {
+  const values = new Set();
+  for (const line of String(raw ?? '').split('\n').map(value => value.trim()).filter(Boolean)) {
+    values.add(line);
+    for (const pair of line.split(',')) {
+      const equals = pair.indexOf('=');
+      if (equals < 0) continue;
+      let value;
+      try {
+        value = decodeURIComponent(pair.slice(equals + 1)).trim();
+      } catch {
+        continue;
+      }
+      const credential = value.replace(/^(Basic|Bearer)\s+/i, '');
+      values.add(value).add(credential);
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(credential)) continue;
+      const decoded = Buffer.from(credential, 'base64').toString('utf8');
+      const colon = decoded.indexOf(':');
+      if (colon > 0 && /^[\x20-\x7e]+$/.test(decoded)) values.add(decoded).add(decoded.slice(colon + 1));
+    }
+  }
+  return [...values];
 }
 
 /** Reads and checks the agent's files. Returns { problem } or { outcome, estimatedLines, spec, comment }. */
@@ -99,7 +128,7 @@ async function send(method, url, token, body, fetchImpl) {
 export async function run({ dir, env, fetchImpl = fetch }) {
   if (!/^\d+$/.test(env.ISSUE_NUMBER ?? '')) throw new Error(`ISSUE_NUMBER must be an issue number, not "${env.ISSUE_NUMBER}".`);
   const issueUrl = `${env.GITHUB_API_URL}/repos/${env.GITHUB_REPOSITORY}/issues/${env.ISSUE_NUMBER}`;
-  const secretValues = String(env.SECRET_VALUES ?? '').split('\n').map(value => value.trim()).filter(Boolean);
+  const secretValues = knownSecrets(env.SECRET_VALUES);
   const result = env.AGENT_OUTCOME === 'success'
     ? readOutputs(dir, secretValues)
     : { problem: 'the agent run failed or reached its turn cap' };
