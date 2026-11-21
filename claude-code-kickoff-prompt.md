@@ -20,7 +20,7 @@ Every block message must tell the agent what to do instead, normally: stop and e
 ## How I want to work
 
 - Plan before building. Propose the repo structure and the hook design first, and don't write code until I've agreed the plan.
-- Ask me one question at a time.
+- Ask related questions together, numbered, each with a recommendation.
 - If something in the decisions doc looks wrong or contradictory, say so and explain why before building on it. Don't silently work around it.
 - Prefer readable code over clever code. Use self-describing identifiers, minimal comments and British English in docs. No emoji.
 - Never write my employer's name, or anything that identifies it, in any file, commit message or comment. I won't give it to you. If you see it in something I paste, tell me rather than using it.

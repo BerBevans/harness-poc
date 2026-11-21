@@ -17,6 +17,28 @@ Working notes for sessions in the harness repo. The design is `docs/decisions.md
 - Remove `needs-spec` before commenting on an issue you're closing or splitting.
 - Check each round's claims against the code before replying.
 - Reply to every point you want changed. The agent changes only what a reply addresses.
+- A round takes about 90 seconds, too fast to cancel a queued duplicate.
+- Every spec App comment starts a workflow run that the trigger stops in about 200 ms ("not the owner"). That's expected, not a loop.
+- Check rounds against the rules too: one round read the code correctly but talked itself past the size rule.
+
+## Tests
+
+Run in a login shell so `~/.profile` applies. The build tests need .NET, and install Stryker into `.test-work/` on first run (network needed).
+
+- From `plugins/factory-harness/hooks`: `node --test "test/*.test.mjs"` and `node --test "test/integration/*.test.mjs"`
+- From `plugins/factory-harness/ci`: `node --test "test/*.test.mjs"`
+- From the repo root: `node --test "build/test/*.test.mjs"` and `node --test "workstation/claude/*.test.mjs"`
+
+## Gotchas
+
+- This repo doesn't enable its own plugin: it would block the guardrail work done here.
+- Harness PRs keep to the 300-line limit by hand (this repo doesn't run the size check): added plus removed lines, blank ones left out.
+- The runner rewrites `$RUNNER_TEMP/_github_workflow/event.json` before every step, so `run-agent.mjs` deletes it in the agent's own step.
+- `Run-agent check` has a concurrency group that keeps one queued run. To run it repeatedly, start each run after the previous one finishes.
+- `system/init` can be read for free: kill the process after the first line and no request reaches the model.
+- `plugin validate .` checks only `marketplace.json`; also run `plugin validate plugins/factory-harness`.
+- CODEOWNERS is case-sensitive; `isGuardrailPath` isn't. The template lists the casings .NET tools look for. A new guardrail goes in both `templates/CODEOWNERS.example` and the examples in `ci/test/helpers.mjs` (`codeowners-template.test.mjs` checks).
+- Parallel `dotnet` calls on a fresh runner race on the NuGet-Migrations lock, so `harness-ci.yml` runs `dotnet nuget locals all --list` first.
 
 ## SDK updates
 
