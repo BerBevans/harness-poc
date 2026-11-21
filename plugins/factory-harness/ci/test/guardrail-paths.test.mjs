@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluate, guardrailPathsTouched, localSettingsCommitted, run } from '../guardrail-paths.mjs';
+import { evaluate, factoryFilesCommitted, guardrailPathsTouched, localSettingsCommitted, run } from '../guardrail-paths.mjs';
 import { changed, fakeApi, GUARDRAIL_EXAMPLES, ORDINARY_EXAMPLES } from './helpers.mjs';
 
 const OWNER = { login: 'owner', id: 1001, type: 'User' };
@@ -144,4 +144,40 @@ test('nobody is exempt from the local settings rule, the owner and Dependabot in
 test('an exempt author still fails closed when not every changed file was listed', () => {
   const result = evaluate({ author: OWNER, files: changed('src/a.cs'), changedFileCount: 3500, exemptUserIds: [OWNER.id] });
   assert.equal(result.passed, false);
+});
+
+test('the progress note and run outputs are factory working files, in any casing', () => {
+  const paths = ['.factory/progress.md', '.factory/run/outcome.json', '.Factory/Run/pr.md'];
+  assert.deepEqual(factoryFilesCommitted(changed(...paths)), paths);
+});
+
+test('similar names outside the root factory folder are not factory working files', () => {
+  const paths = ['docs/.factory/progress.md', '.factory.md', 'factory/progress.md', 'docs/specs/35-storage.md'];
+  assert.deepEqual(factoryFilesCommitted(changed(...paths)), []);
+});
+
+test('a file renamed into the factory folder counts under its new name', () => {
+  const files = [{ filename: '.factory/progress.md', previous_filename: 'notes.md', status: 'renamed' }];
+  assert.deepEqual(factoryFilesCommitted(files), ['.factory/progress.md']);
+});
+
+test('deleting a factory working file or renaming it out passes, so a resumed run can merge', () => {
+  const files = [
+    { filename: '.factory/progress.md', status: 'removed' },
+    { filename: 'docs/progress.md', previous_filename: '.factory/run/pr.md', status: 'renamed' },
+  ];
+  assert.deepEqual(factoryFilesCommitted(files), []);
+  assert.equal(check(AGENT, [...files, ...changed('src/a.cs')]).passed, true);
+});
+
+test('nobody is exempt from the factory files rule, the owner and Dependabot included', () => {
+  for (const author of [OWNER, DEPENDABOT, AGENT]) {
+    const result = check(author, changed('src/a.cs', '.factory/progress.md'));
+    assert.equal(result.passed, false, author.login);
+    assert.deepEqual(result.lines, [
+      '::error file=.factory/progress.md::.factory/progress.md is a factory working file.',
+      'Files under .factory/ are the factory\'s working files and never merge. A draft PR may hold ' +
+        'the progress note while work is paused; finish the work and delete them. Nobody is exempt from this rule.',
+    ]);
+  }
 });
