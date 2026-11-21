@@ -15,9 +15,13 @@
 // the harness itself. Deny rules beat allow rules. Bash can still read anything, so the role lists
 // keep it narrow, and the steps that post an agent's output check it for secrets.
 //
+// Telemetry is Claude Code's OpenTelemetry export of metrics and events, never content: the run sets
+// every OTEL_ variable itself, so a caller's job environment can't switch prompt or tool logging on.
+//
 // Usage: node run-agent.mjs <tool folder> <transcript file>
 // Environment: AGENT_PROMPT, PLUGIN_DIR, AGENT_MAX_TURNS, AGENT_ALLOWED_TOOLS (one rule per line),
-// optional AGENT_MODEL, plus CLAUDE_CODE_OAUTH_TOKEN and FACTORY_ISSUE, which pass through.
+// optional AGENT_MODEL, AGENT_ROLE, AGENT_OTEL_ENDPOINT and AGENT_OTEL_HEADERS, plus
+// CLAUDE_CODE_OAUTH_TOKEN and FACTORY_ISSUE, which pass through.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -66,6 +70,65 @@ export function deniedTools({ runnerTemp, pluginDir }) {
     '~/.ssh/**', '~/.config/**', '~/.gitconfig', '~/.claude/**', '~/.claude.json',
     absolute(runnerTemp), absolute(pluginDir)];
   return places.flatMap(place => [`Read(${place})`, `Edit(${place})`]);
+}
+
+// Claude Code's switches that put content (prompts, tool inputs and outputs, responses, request
+// bodies) into telemetry. Each is set off explicitly.
+export const CONTENT_SWITCHES = [
+  'OTEL_LOG_USER_PROMPTS', 'OTEL_LOG_TOOL_DETAILS', 'OTEL_LOG_TOOL_CONTENT',
+  'OTEL_LOG_ASSISTANT_RESPONSES', 'OTEL_LOG_RAW_API_BODIES',
+];
+
+const isTelemetrySetting = name =>
+  name.startsWith('OTEL_') || ['CLAUDE_CODE_ENABLE_TELEMETRY', 'CLAUDE_CODE_ENHANCED_TELEMETRY_BETA'].includes(name);
+
+/** OTEL_RESOURCE_ATTRIBUTES for the run, so metrics split by role, model, issue and workflow run. */
+export function resourceAttributes(env) {
+  const attributes = {
+    'factory.role': env.AGENT_ROLE,
+    'factory.model': env.AGENT_MODEL || 'default',
+    'factory.issue': env.FACTORY_ISSUE,
+    'github.repository': env.GITHUB_REPOSITORY,
+    'github.run_id': env.GITHUB_RUN_ID,
+  };
+  return Object.entries(attributes)
+    .filter(([, value]) => value)
+    .map(([name, value]) => `${name}=${encodeURIComponent(value)}`)
+    .join(',');
+}
+
+/**
+ * The agent's environment: the caller's, with every telemetry setting replaced by the run's own.
+ * Telemetry is off unless AGENT_OTEL_ENDPOINT is set. Returns { env, summary }.
+ */
+export function telemetryEnvironment(env) {
+  const { AGENT_OTEL_ENDPOINT: endpoint, AGENT_OTEL_HEADERS: headers, ...rest } = env;
+  const clean = Object.fromEntries(Object.entries(rest).filter(([name]) => !isTelemetrySetting(name)));
+  if (!endpoint) {
+    if (headers) throw new Error('AGENT_OTEL_HEADERS is set without AGENT_OTEL_ENDPOINT. Set both, or neither.');
+    return { env: { ...clean, CLAUDE_CODE_ENABLE_TELEMETRY: '0' }, summary: 'Telemetry is off: no endpoint was given.' };
+  }
+  let host;
+  try {
+    host = new URL(endpoint).host;
+  } catch {
+    throw new Error('AGENT_OTEL_ENDPOINT is not a URL.');
+  }
+  return {
+    env: {
+      ...clean,
+      CLAUDE_CODE_ENABLE_TELEMETRY: '1',
+      OTEL_METRICS_EXPORTER: 'otlp',
+      OTEL_LOGS_EXPORTER: 'otlp',
+      OTEL_TRACES_EXPORTER: 'none',
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+      OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
+      ...(headers ? { OTEL_EXPORTER_OTLP_HEADERS: headers } : {}),
+      OTEL_RESOURCE_ATTRIBUTES: resourceAttributes(env),
+      ...Object.fromEntries(CONTENT_SWITCHES.map(name => [name, '0'])),
+    },
+    summary: `Telemetry: metrics and events to ${host}, content off.`,
+  };
 }
 
 /** Claude Code's arguments. No --bare: bare mode ignores CLAUDE_CODE_OAUTH_TOKEN. */
@@ -185,6 +248,8 @@ await runIfMain(import.meta.url, async env => {
     allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
     deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
   });
+  const telemetry = telemetryEnvironment(env);
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
-  return runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env });
+  const result = await runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env: telemetry.env });
+  return { ...result, lines: [telemetry.summary, ...result.lines] };
 });

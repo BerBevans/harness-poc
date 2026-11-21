@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CLAUDE_CODE_VERSION, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, runAgent,
+  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, agentArguments, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
 } from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
@@ -141,4 +141,50 @@ test('a command that does not exist fails', async t => {
   const run = await runAgent({ command: path.join(tempDir(t), 'no-claude'), args: [], pluginDir, transcriptFile: path.join(tempDir(t), 't.jsonl') });
   assert.equal(run.passed, false);
   assert.match(run.lines.join('\n'), /didn't start/);
+});
+
+const ENDPOINT = 'https://otlp.example.net/otlp';
+
+test('telemetry is off without an endpoint, and the caller\'s telemetry settings are dropped', () => {
+  const { env, summary } = telemetryEnvironment({ PATH: '/bin', OTEL_LOG_USER_PROMPTS: '1', OTEL_METRICS_EXPORTER: 'console' });
+  assert.deepEqual(env, { PATH: '/bin', CLAUDE_CODE_ENABLE_TELEMETRY: '0' });
+  assert.match(summary, /off/);
+});
+
+test('headers without an endpoint are refused, since telemetry would silently stay off', () => {
+  assert.throws(() => telemetryEnvironment({ AGENT_OTEL_HEADERS: 'Authorization=Basic x' }), /without AGENT_OTEL_ENDPOINT/);
+});
+
+test('an endpoint that is not a URL is refused, without echoing it', () => {
+  assert.throws(() => telemetryEnvironment({ AGENT_OTEL_ENDPOINT: 'not a url secret' }), error => !error.message.includes('secret'));
+});
+
+test('with an endpoint, metrics and events go out over OTLP, with traces and every content switch off', () => {
+  const { env, summary } = telemetryEnvironment({ AGENT_OTEL_ENDPOINT: ENDPOINT, AGENT_OTEL_HEADERS: 'Authorization=Basic abc' });
+  assert.equal(env.CLAUDE_CODE_ENABLE_TELEMETRY, '1');
+  assert.equal(env.OTEL_METRICS_EXPORTER, 'otlp');
+  assert.equal(env.OTEL_LOGS_EXPORTER, 'otlp');
+  assert.equal(env.OTEL_TRACES_EXPORTER, 'none');
+  assert.equal(env.OTEL_EXPORTER_OTLP_ENDPOINT, ENDPOINT);
+  assert.equal(env.OTEL_EXPORTER_OTLP_HEADERS, 'Authorization=Basic abc');
+  for (const name of CONTENT_SWITCHES) assert.equal(env[name], '0', name);
+  assert.equal(env.AGENT_OTEL_HEADERS, undefined, 'the input copy of the headers is not passed on');
+  assert.equal(summary, 'Telemetry: metrics and events to otlp.example.net, content off.');
+  assert.doesNotMatch(summary, /abc/);
+});
+
+test('a caller can\'t switch content logging or traces on through the job environment', () => {
+  const caller = { AGENT_OTEL_ENDPOINT: ENDPOINT, OTEL_TRACES_EXPORTER: 'otlp', CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: '1' };
+  for (const name of CONTENT_SWITCHES) caller[name] = '1';
+  const { env } = telemetryEnvironment(caller);
+  for (const name of CONTENT_SWITCHES) assert.equal(env[name], '0', name);
+  assert.equal(env.OTEL_TRACES_EXPORTER, 'none');
+  assert.equal(env.CLAUDE_CODE_ENHANCED_TELEMETRY_BETA, undefined);
+});
+
+test('resource attributes name the role, model, issue and run, encoded, and skip what is unset', () => {
+  assert.equal(
+    resourceAttributes({ AGENT_ROLE: 'spec', AGENT_MODEL: 'sonnet', FACTORY_ISSUE: '35', GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '9' }),
+    'factory.role=spec,factory.model=sonnet,factory.issue=35,github.repository=o%2Fr,github.run_id=9');
+  assert.equal(resourceAttributes({}), 'factory.model=default');
 });

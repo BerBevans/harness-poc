@@ -31,6 +31,12 @@ inputs:
   max-turns:
     description: The most turns the round may take. A round that reaches it posts a failure comment.
     default: '20'
+  otel-endpoint:
+    description: OTLP/HTTP endpoint for the agent's metrics and events, as for run-agent. Empty turns telemetry off.
+    default: ''
+  otel-headers:
+    description: OTLP headers, as for run-agent, from one secret holding a write-only telemetry token.
+    default: ''
 
 runs:
   using: composite
@@ -56,6 +62,9 @@ runs:
       env:
         AGENT_MODEL: ${{ inputs.model }}
         AGENT_MAX_TURNS: ${{ inputs.max-turns }}
+        AGENT_ROLE: spec
+        AGENT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
+        AGENT_OTEL_HEADERS: ${{ inputs.otel-headers }}
         AGENT_ALLOWED_TOOLS: |
           Read(./**)
           Edit(./.factory/run/**)

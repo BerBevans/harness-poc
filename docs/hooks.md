@@ -187,6 +187,9 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
     allowed-tools: |
       Read(./**)
       Edit(./.factory/run/**)
+    role: spec
+    otel-endpoint: ${{ vars.GRAFANA_OTLP_ENDPOINT }}
+    otel-headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
 ```
 
 - **The plugin comes from the action's own copy of the harness.** GitHub downloads the whole harness at the tag in `uses:`, so the plugin is the version you pinned, written once. A reusable workflow can't see which ref it was called at, so it would need the tag repeated as an input, and the two could drift apart.
@@ -197,6 +200,7 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
 - **The event payload file is deleted before the agent starts,** because it holds every comment on the issue. Later steps must read event data from the `github` context.
 - **Check out with `persist-credentials: false`, and set no token in the job's `env`.** Otherwise the agent can read the token from `.git/config` or its environment.
 - **`issue` becomes `FACTORY_ISSUE`,** so a hook that blocks the agent tells it to comment on that issue and write a progress note.
+- **Telemetry is Claude Code's OpenTelemetry export of metrics and events,** over OTLP/HTTP to `otel-endpoint`, and off when that's empty. The script sets every `OTEL_` variable itself, so a job's `env` can't switch on prompts, tool content, responses, request bodies or traces. The resource attributes are `factory.role`, `factory.model` (the run's `model` input, or `default`), `factory.issue`, `github.repository` and `github.run_id`, so cost and tokens split by role and by the model a run was started with. Claude Code's own `model` attribute is per request and includes its background Haiku calls. Keep the whole header, such as `Authorization=Basic%20<base64 of instance ID:token>` (the space is percent-encoded), in one secret so the log masks it, and use a token that can only write metrics and logs: the agent's commands can see the environment. On a subscription token, `claude_code.cost.usage` is an estimate at API prices, not the bill.
 - **It doesn't pass `--bare`.** Bare mode still loads `--plugin-dir`, but it doesn't read `CLAUDE_CODE_OAUTH_TOKEN`. It would need an API key, which is billed separately from the subscription.
 - **The token** comes from `claude setup-token`, lasts a year and is stored as the `CLAUDE_CODE_OAUTH_TOKEN` repository secret. CI usage counts against the same subscription allowance as interactive sessions.
 
@@ -237,6 +241,8 @@ jobs:
           app-client-id: ${{ vars.SPEC_APP_CLIENT_ID }}
           app-private-key: ${{ secrets.SPEC_APP_PRIVATE_KEY }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          otel-endpoint: ${{ vars.GRAFANA_OTLP_ENDPOINT }}
+          otel-headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
 ```
 
 - **Only the owner starts a round,** by applying `needs-spec` or commenting on an issue that has it, and only on an issue the owner opened. Other events end the job with the reason in the log.
