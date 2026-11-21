@@ -27,6 +27,9 @@ const SECRET_SHAPES = [
   ['an Anthropic key or token', /\bsk-ant-[\w-]{20,}/],
   ['a private key', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
   ['an AWS access key', /\bAKIA[0-9A-Z]{16}\b/],
+  ['a Grafana Cloud token', /\bglc_[A-Za-z0-9+/=_-]{20,}/],
+  // Base64 after Basic, with a digit, + or / in it, so prose such as "Basic authentication" passes.
+  ['a Basic auth header', /\bBasic(%20|\s+)(?=[A-Za-z0-9+/]*[0-9+/])[A-Za-z0-9+/]{16,}={0,2}/],
 ];
 
 /** What in the text looks like a secret: a known value, or a credential's shape. */
