@@ -178,3 +178,58 @@ jobs:
             if (problems.length > 0) process.exit(1);
             console.log(`The fence held: ${denied.length} refusal(s), allowed write and Bash worked, event file unseen.`);
           '
+
+  telemetry-exports:
+    name: Agent exports metrics and events, never content
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Set by the caller to prove run-agent overrides them: content must stay off whatever the job says.
+    env:
+      OTEL_LOG_USER_PROMPTS: '1'
+      OTEL_LOG_TOOL_CONTENT: '1'
+      OTEL_LOG_TOOL_DETAILS: '1'
+      OTEL_TRACES_EXPORTER: otlp
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The canary is in the prompt and in a file the agent reads, so prompt or tool content logging
+      # would both export it.
+      - name: Plant a canary and start a local OTLP receiver
+        id: setup
+        run: |
+          canary="CANARY$RANDOM$RANDOM"
+          echo "canary=$canary" >> "$GITHUB_OUTPUT"
+          echo "$canary" > canary.txt
+          nohup node .github/run-agent-check/otlp-receiver.mjs serve "$RUNNER_TEMP/otlp.jsonl" > /dev/null 2>&1 &
+          for attempt in $(seq 50); do test -f "$RUNNER_TEMP/otlp.jsonl.ready" && exit 0; sleep 0.1; done
+          echo "::error::The OTLP receiver didn't start." && exit 1
+
+      - uses: ./actions/run-agent
+        with:
+          prompt: Use Read on canary.txt, then reply with the single word ready. Test marker ${{ steps.setup.outputs.canary }}.
+          claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          model: haiku
+          role: run-agent-check
+          max-turns: 3
+          allowed-tools: Read(./**)
+          otel-endpoint: http://127.0.0.1:4318
+          otel-headers: Authorization=Bearer check-header
+
+      - name: Check what reached the receiver
+        env:
+          EXPECTED_AUTHORIZATION: Bearer check-header
+          CANARY: ${{ steps.setup.outputs.canary }}
+          EXPECTED_TEXT: |
+            claude_code.token.usage
+            claude_code.api_request
+            factory.role
+            run-agent-check
+            factory.model
+            haiku
+        run: node .github/run-agent-check/otlp-receiver.mjs check "$RUNNER_TEMP/otlp.jsonl"

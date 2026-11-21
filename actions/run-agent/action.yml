@@ -5,7 +5,8 @@ description: >
   Claude Code, authenticates with a claude setup-token OAuth token, and fails the run at startup
   unless the plugin loaded. The transcript goes to a file, not the job log, which is public on a
   public repo. Deletes the event payload file before the agent starts, because it holds every
-  comment on the issue: later steps must read event data from the github context instead.
+  comment on the issue: later steps must read event data from the github context instead. With an
+  OTLP endpoint, exports Claude Code's metrics and events, never prompts or tool content.
 
 inputs:
   prompt:
@@ -21,6 +22,19 @@ inputs:
     default: ''
   model:
     description: The model to use. Leave empty for Claude Code's default.
+    default: ''
+  role:
+    description: The agent's role, such as spec, sent as the factory.role telemetry attribute.
+    default: ''
+  otel-endpoint:
+    description: >
+      OTLP/HTTP endpoint for Claude Code's metrics and events. Empty turns telemetry off. Prompts,
+      tool content and traces are never exported, whatever the job environment sets.
+    default: ''
+  otel-headers:
+    description: >
+      OTLP headers, such as Authorization=Basic <token>, from one secret so the log masks it. Use a
+      token that can only write telemetry: the agent's commands can see the environment.
     default: ''
   max-turns:
     description: The most turns the agent may take before the run stops.
@@ -49,6 +63,9 @@ runs:
         AGENT_MODEL: ${{ inputs.model }}
         AGENT_MAX_TURNS: ${{ inputs.max-turns }}
         AGENT_ALLOWED_TOOLS: ${{ inputs.allowed-tools }}
+        AGENT_ROLE: ${{ inputs.role }}
+        AGENT_OTEL_ENDPOINT: ${{ inputs.otel-endpoint }}
+        AGENT_OTEL_HEADERS: ${{ inputs.otel-headers }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         FACTORY_ISSUE: ${{ inputs.issue }}
       run: |
