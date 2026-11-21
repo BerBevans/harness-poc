@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MAX_COMPLETE_LINES, OUTCOMES, composeBody, failureComment, findSecrets, originalRequest, readOutputs, run } from '../spec-post.mjs';
+import { MAX_COMPLETE_LINES, OUTCOMES, composeBody, failureComment, findSecrets, knownSecrets, originalRequest, readOutputs, run } from '../spec-post.mjs';
 
 const TOKEN = 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz';
+// Shaped like no known token, so only the derived values can catch it.
+const OTLP_PASSWORD = 'plainpassword1234567890';
+const OTLP_PAIR = `123456:${OTLP_PASSWORD}`;
+const OTLP_BASE64 = Buffer.from(OTLP_PAIR).toString('base64');
+const OTLP_HEADERS = `Authorization=Basic%20${OTLP_BASE64}`;
 
 const runFolder = (t, files = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-post-'));
@@ -113,6 +118,38 @@ test('a failed agent run or a bad file leaves the body alone and posts only a fa
     assert.deepEqual(api.calls.map(call => call.method), ['POST']);
     assert.equal(api.calls[0].body, failureComment(problem));
   }
+});
+
+test('the OTLP headers line yields the header value, its Base64 part, the decoded pair and the password', () => {
+  const values = knownSecrets(`${TOKEN}\n${OTLP_HEADERS}\n`);
+  for (const value of [TOKEN, OTLP_HEADERS, `Basic ${OTLP_BASE64}`, OTLP_BASE64, OTLP_PAIR, OTLP_PASSWORD]) {
+    assert.ok(values.includes(value), value);
+  }
+  assert.deepEqual(knownSecrets(`${TOKEN}\n\n`), [TOKEN], 'no header: the empty second line adds nothing');
+  assert.deepEqual(knownSecrets('Authorization=Bearer%20not-base64-token'),
+    ['Authorization=Bearer%20not-base64-token', 'Bearer not-base64-token', 'not-base64-token']);
+  assert.deepEqual(knownSecrets(''), []);
+});
+
+test('a round leaking any form of the OTLP credential posts only a failure comment', async t => {
+  for (const leak of [OTLP_BASE64, OTLP_PAIR, OTLP_PASSWORD, `Basic ${OTLP_BASE64}`]) {
+    const api = fakeApi();
+    const result = await run({
+      dir: runFolder(t, { 'comment.md': `Header was ${leak}.` }),
+      env: env({ SECRET_VALUES: `${TOKEN}\n${OTLP_HEADERS}\n` }), fetchImpl: api.fetchImpl,
+    });
+    assert.equal(result.passed, false, leak);
+    assert.deepEqual(api.calls.map(call => call.method), ['POST'], leak);
+    assert.match(api.calls[0].body, /a secret value/, leak);
+  }
+});
+
+test('the two-line SECRET_VALUES without a header still catches the token and passes a clean round', async t => {
+  const secrets = `${TOKEN}\n\n`;
+  const clean = await run({ dir: runFolder(t), env: env({ SECRET_VALUES: secrets }), fetchImpl: fakeApi().fetchImpl });
+  assert.equal(clean.passed, true);
+  const leaked = await run({ dir: runFolder(t, { 'spec.md': `x ${TOKEN}` }), env: env({ SECRET_VALUES: secrets }), fetchImpl: fakeApi().fetchImpl });
+  assert.equal(leaked.passed, false);
 });
 
 test('an issue number that isn\'t a number is an error', async t => {
