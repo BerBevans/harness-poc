@@ -91,6 +91,8 @@ runs:
       env:
         AGENT_OUTCOME: ${{ steps.agent.outcome }}
         ISSUE_NUMBER: ${{ steps.trigger.outputs.issue }}
-        SECRET_VALUES: ${{ inputs.claude-code-oauth-token }}
+        SECRET_VALUES: |
+          ${{ inputs.claude-code-oauth-token }}
+          ${{ inputs.otel-headers }}
         GITHUB_TOKEN: ${{ steps.token.outputs.token }}
       run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/spec-post.mjs" .factory/run

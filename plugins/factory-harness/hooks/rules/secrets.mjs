@@ -14,7 +14,7 @@ const SSH_KEY_NAMES = /^id_(rsa|dsa|ecdsa|ed25519)/;
 const HOME_SECRET_FOLDERS = ['.ssh', '.aws', '.azure', '.config/gh'];
 // A process's environment, its open files, and the runner's event payload folder.
 const SYSTEM_SECRET_FOLDERS = ['/proc', '/dev/fd'];
-const SECRET_VARIABLES = /CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|GITHUB_EVENT_PATH|ACTIONS_ID_TOKEN_REQUEST_TOKEN|ACTIONS_RUNTIME_TOKEN/i;
+const SECRET_VARIABLES = /CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|OTEL_EXPORTER_OTLP_(\w+_)?HEADERS|AGENT_OTEL_HEADERS|GITHUB_EVENT_PATH|ACTIONS_ID_TOKEN_REQUEST_TOKEN|ACTIONS_RUNTIME_TOKEN/i;
 // Shell built-ins that print every variable when given no names.
 const LISTS_VARIABLES = { export: ['-p'], set: [], declare: ['-p', '-x', '-px', '-xp'], typeset: ['-p', '-x'] };
 

@@ -54,6 +54,13 @@ test('output holding a known secret value or a credential\'s shape is refused, w
   assert.deepEqual(findSecrets('Use the Members table, AKIA is not a key here.', ['short']), []);
 });
 
+test('Grafana tokens and Basic auth headers are refused, and prose about them passes', () => {
+  assert.deepEqual(findSecrets('glc_eyJvIjoiMTIzNDU2NyIsIm4iOiJmYWN0b3J5In0=', []), ['a Grafana Cloud token']);
+  assert.deepEqual(findSecrets('Authorization=Basic%20MTIzNDU2OmdsY19hYmNkZWZnaGlqa2xtbm9w', []), ['a Basic auth header']);
+  assert.deepEqual(findSecrets('Authorization: Basic MTIzNDU2OmFiY2RlZmdoaWprbG1ub3A=', []), ['a Basic auth header']);
+  assert.deepEqual(findSecrets('Use Basic authentication, never Basic internationalisation, for glc_ prefixes.', []), []);
+});
+
 test('the first round keeps the whole body as the original request', () => {
   const body = composeBody('## Summary', '## Outcome\n\nBoth owners can sign in.\n');
   assert.equal(body, '## Summary\n\n<details>\n<summary>Original request</summary>\n\n' +
