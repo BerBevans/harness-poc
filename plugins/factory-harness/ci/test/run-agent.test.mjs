@@ -146,7 +146,10 @@ test('a command that does not exist fails', async t => {
 const ENDPOINT = 'https://otlp.example.net/otlp';
 
 test('telemetry is off without an endpoint, and the caller\'s telemetry settings are dropped', () => {
-  const { env, summary } = telemetryEnvironment({ PATH: '/bin', OTEL_LOG_USER_PROMPTS: '1', OTEL_METRICS_EXPORTER: 'console' });
+  const caller = { PATH: '/bin', OTEL_LOG_USER_PROMPTS: '1', OTEL_METRICS_EXPORTER: 'console' };
+  for (const name of TELEMETRY_SWITCHES) caller[name] = '1';
+  caller.BETA_TRACING_ENDPOINT = 'http://elsewhere.example';
+  const { env, summary } = telemetryEnvironment(caller);
   assert.deepEqual(env, { PATH: '/bin', CLAUDE_CODE_ENABLE_TELEMETRY: '0' });
   assert.match(summary, /off/);
 });

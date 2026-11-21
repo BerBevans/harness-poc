@@ -28,11 +28,13 @@ if (mode === 'serve') {
     ? fs.readFileSync(recordFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
     : [];
   const paths = requests.map(request => request.path);
+  // Unexpected paths first: a redirect to a beta endpoint also leaves a signal missing, and this
+  // names the cause.
+  const unexpected = paths.filter(path => !['/v1/metrics', '/v1/logs'].includes(path));
+  if (unexpected.length > 0) fail(`Requests reached ${[...new Set(unexpected)].join(', ')}, so traces or a beta export are on. run-agent must allow only metrics and logs.`);
   for (const signal of ['/v1/metrics', '/v1/logs']) {
     if (!paths.includes(signal)) fail(`No request reached ${signal}. Requests seen: ${paths.join(', ') || 'none'}.`);
   }
-  const unexpected = paths.filter(path => !['/v1/metrics', '/v1/logs'].includes(path));
-  if (unexpected.length > 0) fail(`Requests reached ${[...new Set(unexpected)].join(', ')}, so traces or a beta export are on. run-agent must allow only metrics and logs.`);
   if (requests.some(request => request.authorization !== process.env.EXPECTED_AUTHORIZATION)) {
     fail('A request arrived without the expected Authorization header.');
   }
