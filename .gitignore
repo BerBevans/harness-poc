@@ -5,8 +5,10 @@ TestResults/
 # Smart App Control blocks loading freshly built DLLs from there.
 .test-work/
 
-# Local session notes, loaded automatically by Claude Code.
+# Local session notes: CLAUDE.local.md is loaded automatically by Claude Code;
+# .local/ holds the backlog and reference notes, read on demand.
 CLAUDE.local.md
+.local/
 
 # Claude Code local settings: approved commands can hold secrets in plain text.
 **/.claude/settings.local.json
