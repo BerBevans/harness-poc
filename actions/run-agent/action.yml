@@ -33,7 +33,7 @@ inputs:
     default: ''
   otel-headers:
     description: >
-      OTLP headers, such as Authorization=Basic <token>, from one secret so the log masks it. Use a
+      OTLP headers, such as Authorization=Basic%20<base64>, from one secret so the log masks it. Use a
       token that can only write telemetry: the agent's commands can see the environment.
     default: ''
   max-turns:
