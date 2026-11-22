@@ -3,7 +3,7 @@
 // included. On a runner the environment holds the Claude token, and the event payload file holds
 // every comment on the issue, so both count as secrets.
 
-import { baseName, expandHome, isUnder, normalisePath, segments } from '../lib/paths.mjs';
+import { baseName, expandHome, isUnder, normalisePath, pathForms, segments } from '../lib/paths.mjs';
 import { gitInvocations, invocationsOf, splitSegments, tokenise, unquote } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
@@ -56,11 +56,12 @@ function printsEnvironment(command) {
 
 // Every token in the command that could be a path, checked against the secret paths.
 // Quoted text containing spaces, such as a commit message, is prose rather than a path.
-function secretPathInCommand(command, home) {
+function secretPathInCommand(command, context, cwd) {
+  const { home } = context;
   for (const segment of splitSegments(command)) {
     for (const token of tokenise(segment).map(unquote).filter(t => !/\s/.test(t))) {
       const candidate = token.replace(/^[a-z]+=/i, '');
-      if (candidate && isSecretPath(expandHome(candidate, home), home)) return candidate;
+      if (candidate && pathForms(candidate, context, cwd).some(p => isSecretPath(p, home))) return candidate;
     }
   }
   return null;
@@ -79,7 +80,7 @@ export function check(change, context) {
     const credentialCommand = commandPrintsCredentials(change.command);
     if (credentialCommand) return blocked(credentialCommand);
 
-    const mentioned = secretPathInCommand(change.command, context.home);
+    const mentioned = secretPathInCommand(change.command, context, change.cwd);
     if (mentioned) return blocked(mentioned);
   }
 

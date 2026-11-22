@@ -5,7 +5,8 @@
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd']);
 const MAX_DEPTH = 4;
 
-// Splits on ;, |, &&, || and newlines that aren't inside quotes.
+// Splits on ;, |, &, &&, || and newlines that aren't inside quotes. An & next to a redirect
+// (2>&1, &>file, >&2) isn't a separator.
 function splitOutsideQuotes(command) {
   const parts = [];
   let current = '';
@@ -15,7 +16,8 @@ function splitOutsideQuotes(command) {
     if (quote === '"' && char === '\\') { current += char + (command[++i] ?? ''); continue; }
     if (quote) { if (char === quote) quote = null; current += char; continue; }
     if (char === '"' || char === "'") { quote = char; current += char; continue; }
-    if (char === ';' || char === '|' || char === '\n' || (char === '&' && command[i + 1] === '&')) {
+    const separatingAmpersand = char === '&' && !/[<>]/.test(command[i - 1] ?? '') && command[i + 1] !== '>';
+    if (char === ';' || char === '|' || char === '\n' || separatingAmpersand) {
       parts.push(current);
       current = '';
       if (command[i + 1] === char) i++;
@@ -36,16 +38,17 @@ const substitutions = command =>
  * Throws when shells nest deeper than MAX_DEPTH, so the guard fails closed.
  */
 export function splitSegments(command, depth = 0) {
-  if (depth > MAX_DEPTH) throw new Error(`the command nests shells more than ${MAX_DEPTH} deep`);
+  if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
   const segments = [];
   for (const body of substitutions(command)) segments.push(...splitSegments(body, depth + 1));
   for (const part of splitOutsideQuotes(command)) {
-    const segment = part.trim().replace(/^[({]\s*/, '').replace(/\s*[)}]$/, '').trim();
+    const segment = part.trim().replace(/^(?:[({]\s*)+/, '').replace(/(?:\s*[)}])+$/, '').trim();
     if (!segment) continue;
     segments.push(segment);
     const tokens = tokenise(segment);
     const shell = tokens.findIndex(t => SHELLS.has(programName(t)));
-    const flag = shell >= 0 ? tokens.findIndex((t, i) => i > shell && /^([-/]c|-command|-c[a-z]*)$/i.test(t)) : -1;
+    // -c anywhere in a short-option cluster (bash -lc, sh -ec), or pwsh -Command, or cmd /c.
+    const flag = shell >= 0 ? tokens.findIndex((t, i) => i > shell && /^(-[a-z]*c[a-z]*|-command|\/c)$/i.test(t)) : -1;
     if (flag >= 0 && tokens[flag + 1]) segments.push(...splitSegments(unquote(tokens[flag + 1]), depth + 1));
   }
   return segments;
@@ -62,7 +65,7 @@ const isEnvAssignment = token => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 
 // "C:/Program Files/Git/cmd/git.exe" -> "git"
 export const programName = token =>
-  unquote(token).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
+  unquote(token.replace(/^[({]+/, '')).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
 
 /** Every invocation of a program in the command, as its unquoted argument lists. */
 export function invocationsOf(command, program) {
