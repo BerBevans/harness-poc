@@ -68,21 +68,21 @@ jobs:
     name: Guardrail paths
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.14.4
+      - uses: <owner>/harness-poc/actions/guardrail-paths@v0.14.5
         with:
           exempt-user-ids: <your user ID>
   suppression-scan:
     name: Suppression scan
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/suppression-scan@v0.14.4
+      - uses: <owner>/harness-poc/actions/suppression-scan@v0.14.5
         with:
           exempt-user-ids: <your user ID>
   pr-size:
     name: PR size
     runs-on: ubuntu-latest
     steps:
-      - uses: <owner>/harness-poc/actions/pr-size@v0.14.4
+      - uses: <owner>/harness-poc/actions/pr-size@v0.14.5
         with:
           exempt-user-ids: <your user ID>
           override-user-ids: <your user ID>
@@ -92,7 +92,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: <owner>/harness-poc/actions/reset-overrides@v0.14.4
+      - uses: <owner>/harness-poc/actions/reset-overrides@v0.14.5
 ```
 
 - **The guardrail path check** fails any PR that adds, changes, deletes or renames a guardrail file, unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule. It also fails any PR, from anyone, that commits a Claude Code `settings.local.json` or a file under the root `.factory/` folder (the implementer's progress note and run outputs). Deleting either kind, or renaming a factory file out of the folder, passes, so a leak or a paused run can be cleaned up. A draft PR may hold the progress note; it just can't merge.
@@ -131,7 +131,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/build-and-test@v0.14.4
+      - uses: <owner>/harness-poc/actions/build-and-test@v0.14.5
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -144,7 +144,7 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: <owner>/harness-poc/actions/mutation-test@v0.14.4
+      - uses: <owner>/harness-poc/actions/mutation-test@v0.14.5
         with:
           solution: <solution>.slnx
           override-user-ids: <your user ID>
@@ -181,7 +181,7 @@ The integration tests copy `samples/consumer` into `.test-work/` and break it in
 Register the harness marketplace at a pinned tag and enable the plugin, then commit the `.claude/settings.json` it writes:
 
 ```sh
-claude plugin marketplace add <owner>/harness-poc#v0.14.4 --scope project
+claude plugin marketplace add <owner>/harness-poc#v0.14.5 --scope project
 claude plugin install factory-harness@factory-harness --scope project
 ```
 
@@ -195,7 +195,7 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: <owner>/harness-poc/actions/run-agent@v0.14.4
+- uses: <owner>/harness-poc/actions/run-agent@v0.14.5
   with:
     # The trusted commit the run starts from: the default branch for an issue, never a PR's merge commit.
     base-sha: ${{ github.sha }}
@@ -267,7 +267,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: <owner>/harness-poc/actions/spec-agent@v0.14.4
+      - uses: <owner>/harness-poc/actions/spec-agent@v0.14.5
         with:
           owner-user-ids: <your numeric user ID>
           factory-app-slugs: <every factory App's slug, comma-separated>
