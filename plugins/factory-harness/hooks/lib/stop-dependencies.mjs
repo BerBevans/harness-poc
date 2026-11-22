@@ -1,0 +1,100 @@
+// The real git, dotnet and file-system operations behind the Stop hook. Kept apart from
+// the decision logic so that logic can be tested quickly with fakes.
+
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { PROGRESS_NOTE_PATH } from './next-step.mjs';
+import { dotnetRunner } from './dotnet.mjs';
+import { findSolution, gitLines, hashFile, run } from './process.mjs';
+
+const FAST_TEST_PROJECT = /\.(UnitTests|ArchitectureTests)\.csproj$/i;
+const SKIPPED_FOLDERS = new Set(['.git', 'bin', 'obj', 'node_modules', 'TestResults']);
+const MAX_SEARCH_DEPTH = 6;
+
+export function findTestProjects(root) {
+  const found = [];
+  const visit = (directory, depth) => {
+    if (depth > MAX_SEARCH_DEPTH) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory() && !SKIPPED_FOLDERS.has(entry.name)) visit(fullPath, depth + 1);
+      else if (entry.isFile() && FAST_TEST_PROJECT.test(entry.name)) found.push(path.relative(root, fullPath));
+    }
+  };
+  visit(root, 0);
+  return found.sort();
+}
+
+/** Identifies the exact state of the working tree: commit, uncommitted diff and untracked files. */
+export function fingerprint(root) {
+  const hash = createHash('sha256');
+  hash.update(run('git', ['-C', root, 'rev-parse', 'HEAD']).stdout);
+  hash.update(run('git', ['-C', root, 'diff', 'HEAD', '--binary']).stdout);
+  for (const file of gitLines(root, ['ls-files', '--others', '--exclude-standard'])) {
+    hash.update(`${file}:${hashFile(path.join(root, file))}\n`);
+  }
+  return hash.digest('hex');
+}
+
+function lastGreenFile(root, env) {
+  const folder = env.CLAUDE_PLUGIN_DATA || path.join(os.tmpdir(), 'factory-harness');
+  const key = createHash('sha256').update(path.resolve(root).toLowerCase()).digest('hex').slice(0, 16);
+  return path.join(folder, `last-green-${key}`);
+}
+
+const readTextOrNull = filePath => {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * True when the worktree is the trusted base commit, apart from the factory's own working files:
+ * nothing the agent wrote to check (a spec round, say). False without a base commit.
+ */
+export function unchangedFromBase(root, baseSha, git = (args => run('git', ['-C', root, ...args], { timeoutSeconds: 30 }))) {
+  if (!baseSha) return false;
+  const head = git(['rev-parse', 'HEAD']);
+  if (!head.ok || head.stdout.trim() !== baseSha) return false;
+  // --no-renames, so a file moved out of .factory/ shows as added where it landed. A failed status
+  // counts as changed.
+  const status = git(['status', '--porcelain', '--untracked-files=all', '--no-renames']);
+  return status.ok && status.stdout.split('\n').filter(Boolean).every(line => line.slice(3).startsWith('.factory/'));
+}
+
+export function createStopDependencies(env) {
+  const dotnet = dotnetRunner(env);
+  return {
+    env,
+    unchangedFromBase: root => unchangedFromBase(root, env.FACTORY_BASE_SHA),
+    repoRoot: directory => (directory ? gitLines(directory, ['rev-parse', '--show-toplevel'])[0] ?? null : null),
+    findSolution,
+    fingerprint,
+    lastGreen: root => readTextOrNull(lastGreenFile(root, env))?.trim() ?? null,
+    saveGreen: (root, value) => {
+      const file = lastGreenFile(root, env);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, value);
+    },
+    runBuild: (root, solution) => {
+      return dotnet(root, ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'], 300);
+    },
+    // Unknown counts as having projects, so the build runs and reports the real problem.
+    solutionHasProjects: (root, solution) => {
+      const result = dotnet(root, ['sln', solution, 'list'], 60);
+      return !result.ok || result.output.split(/\r?\n/).some(line => /\.\w+proj\s*$/i.test(line));
+    },
+    findTestProjects,
+    runTests: (root, project) => {
+      // Quiet verbosity hides assertion messages; the console logger at normal brings them back.
+      const args = ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
+      return dotnet(root, args, 120);
+    },
+    readProgressNote: root => readTextOrNull(path.join(root, PROGRESS_NOTE_PATH)),
+    hasUncommittedChanges: root => gitLines(root, ['status', '--porcelain']).length > 0,
+  };
+}

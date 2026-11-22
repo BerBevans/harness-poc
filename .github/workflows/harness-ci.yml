@@ -1,0 +1,58 @@
+name: Harness CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  hooks:
+    name: Hook tests
+    runs-on: ubuntu-latest
+    steps:
+      # Tags, for the test that checks the docs' examples name the newest one.
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The SDK is pinned exactly in global.json, so a runner image that ships a newer SDK can't
+      # change the results. Dependabot moves the pin in its own PR.
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The first dotnet command on a fresh runner runs a one-off setup that creates a shared
+      # lock. Run it once here, because the test files run in parallel and race on it.
+      - name: Run the .NET first-use setup
+        run: dotnet nuget locals all --list
+
+      - name: Validate the marketplace manifest
+        run: npx --yes @anthropic-ai/claude-code plugin validate .
+
+      - name: Validate the plugin manifest
+        run: npx --yes @anthropic-ai/claude-code plugin validate plugins/factory-harness
+
+      - name: Unit tests
+        working-directory: plugins/factory-harness/hooks
+        run: node --test "test/*.test.mjs"
+
+      - name: CI check tests
+        working-directory: plugins/factory-harness/ci
+        run: node --test "test/*.test.mjs"
+
+      - name: Build settings target tests
+        run: node --test "build/test/*.test.mjs"
+
+      - name: Workstation hook tests
+        run: node --test "workstation/claude/*.test.mjs"
+
+      - name: Integration tests against the sample consumer
+        working-directory: plugins/factory-harness/hooks
+        run: node --test "test/integration/*.test.mjs"

@@ -1,0 +1,129 @@
+<Project>
+  <!--
+    Fails the build if a project's settings are weaker than the factory requires, however they were
+    changed: in a project file, an imported file of any name, or on the command line.
+
+    CI imports this file through CustomAfterMicrosoftCommonTargets, the last import of all, so nothing
+    in the repo can redefine the target. Each project it checks writes a record to
+    $(BuildSettingsReportDir), and CI fails if any project in the solution has no record. That catches
+    a project that stops this file being imported. The record also says whether the project is a test
+    project, names its assembly and lists the projects it references, so CI can check that every test
+    project's tests ran and knows which unit test projects test which product projects.
+  -->
+
+  <PropertyGroup>
+    <!-- The SDK's own defaults. Anything else in NoWarn is a suppression. -->
+    <_FactoryAllowedNoWarn>1701;1702</_FactoryAllowedNoWarn>
+    <_FactoryFix>Build settings come only from the shared Directory.Build.props, which is human-owned. Remove the setting; if you believe it's needed, comment on the issue to explain why.</_FactoryFix>
+  </PropertyGroup>
+
+  <Target Name="FactoryAssertBuildSettings" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_FactoryReferences>@(ProjectReference->'%(FullPath)', '|')</_FactoryReferences>
+    </PropertyGroup>
+    <WriteLinesToFile
+      Condition="'$(BuildSettingsReportDir)' != ''"
+      File="$(BuildSettingsReportDir)/$([MSBuild]::StableStringHash($(MSBuildProjectFullPath))).txt"
+      Lines="$(MSBuildProjectFullPath);IsTestProject=$(IsTestProject);AssemblyName=$(AssemblyName);ProjectReferences=$(_FactoryReferences)"
+      Overwrite="true" />
+
+    <ItemGroup>
+      <_FactoryNoWarn Include="$([MSBuild]::Unescape($(NoWarn.Replace(',', ';'))))" Exclude="$(_FactoryAllowedNoWarn)" />
+      <!-- Each analysis category can be given its own mode, as AnalysisMode<Category>. -->
+      <_FactoryWeakCategory Include="Design" Condition="'$(AnalysisModeDesign)' != '' and '$(AnalysisModeDesign)' != 'All'" />
+      <_FactoryWeakCategory Include="Documentation" Condition="'$(AnalysisModeDocumentation)' != '' and '$(AnalysisModeDocumentation)' != 'All'" />
+      <_FactoryWeakCategory Include="Globalization" Condition="'$(AnalysisModeGlobalization)' != '' and '$(AnalysisModeGlobalization)' != 'All'" />
+      <_FactoryWeakCategory Include="Interoperability" Condition="'$(AnalysisModeInteroperability)' != '' and '$(AnalysisModeInteroperability)' != 'All'" />
+      <_FactoryWeakCategory Include="Maintainability" Condition="'$(AnalysisModeMaintainability)' != '' and '$(AnalysisModeMaintainability)' != 'All'" />
+      <_FactoryWeakCategory Include="Naming" Condition="'$(AnalysisModeNaming)' != '' and '$(AnalysisModeNaming)' != 'All'" />
+      <_FactoryWeakCategory Include="Performance" Condition="'$(AnalysisModePerformance)' != '' and '$(AnalysisModePerformance)' != 'All'" />
+      <_FactoryWeakCategory Include="Reliability" Condition="'$(AnalysisModeReliability)' != '' and '$(AnalysisModeReliability)' != 'All'" />
+      <_FactoryWeakCategory Include="Security" Condition="'$(AnalysisModeSecurity)' != '' and '$(AnalysisModeSecurity)' != 'All'" />
+      <_FactoryWeakCategory Include="SingleFile" Condition="'$(AnalysisModeSingleFile)' != '' and '$(AnalysisModeSingleFile)' != 'All'" />
+      <_FactoryWeakCategory Include="Style" Condition="'$(AnalysisModeStyle)' != '' and '$(AnalysisModeStyle)' != 'All'" />
+      <_FactoryWeakCategory Include="Trimming" Condition="'$(AnalysisModeTrimming)' != '' and '$(AnalysisModeTrimming)' != 'All'" />
+      <_FactoryWeakCategory Include="Usage" Condition="'$(AnalysisModeUsage)' != '' and '$(AnalysisModeUsage)' != 'All'" />
+    </ItemGroup>
+
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(TreatWarningsAsErrors)' != 'true'"
+      Text="TreatWarningsAsErrors is '$(TreatWarningsAsErrors)'; it must be true. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(WarningsNotAsErrors)' != ''"
+      Text="WarningsNotAsErrors is '$(WarningsNotAsErrors)'; it must be empty. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryNoWarn)' != ''"
+      Text="NoWarn adds @(_FactoryNoWarn, ', '); only the SDK defaults ($(_FactoryAllowedNoWarn)) are allowed. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(Nullable)' != 'enable'"
+      Text="Nullable is '$(Nullable)'; it must be enable. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(AnalysisMode)' != 'All'"
+      Text="AnalysisMode is '$(AnalysisMode)'; it must be All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryWeakCategory)' != ''"
+      Text="AnalysisMode is lowered for @(_FactoryWeakCategory, ', '); every category must be All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(EnforceCodeStyleInBuild)' != 'true'"
+      Text="EnforceCodeStyleInBuild is '$(EnforceCodeStyleInBuild)'; it must be true. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
+      Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
+    <!--
+      Size and complexity limits come from the Sonar analyser, with thresholds in the repo's
+      SonarLint.xml, whose full path CI passes as FactorySonarLintFile. A project could otherwise
+      remove the analyser or swap in a looser SonarLint.xml.
+    -->
+    <ItemGroup>
+      <_FactorySonarAnalyzer Include="@(Analyzer)" Condition="'%(Filename)' == 'SonarAnalyzer.CSharp'" />
+      <_FactorySonarLint Include="@(AdditionalFiles->'%(FullPath)')" Condition="'%(Filename)%(Extension)' == 'SonarLint.xml'" />
+      <_FactoryForeignSonarLint Include="@(_FactorySonarLint)" Exclude="$(FactorySonarLintFile)" />
+    </ItemGroup>
+    <Error Code="FH0002"
+      Condition="'$(FactorySonarLintFile)' == '' or !Exists('$(FactorySonarLintFile)')"
+      Text="FactorySonarLintFile is '$(FactorySonarLintFile)'; CI must pass the full path of the repo's .github/SonarLint.xml, and the file must exist." />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySonarAnalyzer)' == ''"
+      Text="The Sonar analyser (SonarAnalyzer.CSharp) isn't loaded, so the size and complexity limits aren't checked. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySonarLint)' == '' or '@(_FactoryForeignSonarLint)' != ''"
+      Text="The size and complexity thresholds must come only from $(FactorySonarLintFile); this project uses '@(_FactorySonarLint, ', ')'. $(_FactoryFix)" />
+    <!--
+      Rule severities come only from .editorconfig and .globalconfig files, which are guardrails by
+      name at any depth, and the root .editorconfig must be one of them. A project could otherwise
+      add a config file of any other name, through GlobalAnalyzerConfigFiles or EditorConfigFiles,
+      to switch rules off, or drop the root .editorconfig, in a target or with
+      DiscoverEditorConfigFiles. The SDK generates one more file, from build properties, which sets
+      no severities. The repo root is the folder that holds the .github folder FactorySonarLintFile
+      is in. The SDK finds .editorconfig files from the project's own source files, not the code it
+      generates into obj or adds from packages, so a project with no source of its own in the repo has
+      none and isn't checked for it.
+    -->
+    <PropertyGroup>
+      <_FactoryRootEditorConfig>$([System.IO.Path]::GetFullPath('$([System.IO.Path]::GetDirectoryName($(FactorySonarLintFile)))/../.editorconfig'))</_FactoryRootEditorConfig>
+      <_FactoryRepoRoot>$([MSBuild]::NormalizeDirectory($([System.IO.Path]::GetDirectoryName($(_FactoryRootEditorConfig)))))</_FactoryRepoRoot>
+      <_FactoryGeneratedEditorConfig>$([System.IO.Path]::GetFullPath('$(GeneratedMSBuildEditorConfigFile)'))</_FactoryGeneratedEditorConfig>
+    </PropertyGroup>
+    <ItemGroup>
+      <_FactoryAnalyzerConfig Include="@(EditorConfigFiles->'%(FullPath)')" />
+      <_FactorySource Include="@(Compile->'%(FullPath)')" Exclude="$([MSBuild]::NormalizeDirectory($(MSBuildProjectDirectory), $(BaseIntermediateOutputPath)))**" />
+      <_FactorySource Remove="@(_FactorySource)" Condition="!$([System.String]::Copy('%(FullPath)').StartsWith('$(_FactoryRepoRoot)'))" />
+      <_FactoryRootAnalyzerConfig Include="@(_FactoryAnalyzerConfig)" Condition="'%(Identity)' == '$(_FactoryRootEditorConfig)'" />
+      <_FactoryForeignAnalyzerConfig Include="@(_FactoryAnalyzerConfig)"
+        Condition="'%(Filename)%(Extension)' != '.editorconfig' and '%(Extension)' != '.globalconfig' and '%(Identity)' != '$(_FactoryGeneratedEditorConfig)'" />
+    </ItemGroup>
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactorySource)' != '' and '@(_FactoryRootAnalyzerConfig)' == ''"
+      Text="The repo's root .editorconfig ($(_FactoryRootEditorConfig)) isn't among this project's analyser config files, so its rule severities don't apply. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryForeignAnalyzerConfig)' != ''"
+      Text="Rule severities may come only from .editorconfig and .globalconfig files; this project adds @(_FactoryForeignAnalyzerConfig, ', '). $(_FactoryFix)" />
+    <!-- Run settings can exclude code from coverage, so a project may not choose its own. -->
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(RunSettingsFilePath)' != ''"
+      Text="RunSettingsFilePath is '$(RunSettingsFilePath)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(VSTestSetting)' != ''"
+      Text="VSTestSetting is '$(VSTestSetting)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
+  </Target>
+</Project>

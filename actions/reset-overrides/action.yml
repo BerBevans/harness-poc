@@ -1,0 +1,20 @@
+name: Reset override labels
+description: >
+  Removes the size-override, coverage-override and mutation-override labels from a PR when someone
+  pushes to it, because a label approves the diff it was applied to. The checks also ignore them on
+  a push. Call it from a workflow triggered by pull_request_target with synchronize; on other
+  events it does nothing. It never checks out or runs the PR's code.
+
+inputs:
+  github-token:
+    description: Token that can remove labels from the PR. Needs pull-requests write.
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Remove override labels after a push
+      shell: bash
+      run: node "$GITHUB_ACTION_PATH/../../plugins/factory-harness/ci/reset-overrides.mjs"
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
