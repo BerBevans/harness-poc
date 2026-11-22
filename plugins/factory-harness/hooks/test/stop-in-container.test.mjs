@@ -47,7 +47,7 @@ test('in a factory run the Stop hook runs dotnet only through docker', { skip: p
   const calls = fs.readFileSync(dockerLog, 'utf8');
   assert.match(calls, /^run .* sln App\.slnx list$/m);
   // The build and the tests run in one container, so the tests can use the packages the build restored.
-  assert.match(calls, /^run .* --entrypoint bash .* -c solution=/m);
+  assert.match(calls, /^run .* --entrypoint sh .* -c exec 2>&1$/m);
   assert.match(calls, /^done checks App\.slnx$/m);
   assert.match(calls, /^ps --all --quiet --filter name=\^factory-dotnet-$/m, 'leftover containers are removed first');
   assert.match(calls, /^rm --force factory-dotnet-/m);

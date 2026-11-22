@@ -3,7 +3,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CONTAINER_BUDGET_SECONDS, dotnetRunner } from '../lib/dotnet.mjs';
-import { splitChecks, unchangedFromBase } from '../lib/stop-dependencies.mjs';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { buildArguments, CHECKS_SCRIPT, splitChecks, testArguments, unchangedFromBase } from '../lib/stop-dependencies.mjs';
 import { formatBeforeCommit } from '../format-on-commit.mjs';
 import { decideStop } from '../verify-before-stop.mjs';
 
@@ -37,10 +41,39 @@ test('the checks container\'s output splits at its status lines; a step without 
   });
   assert.deepEqual(splitChecks('error CS1002\n@@factory 1\n', projects), { build: { ok: false, output: 'error CS1002\n' }, tests: [] });
   const timedOut = splitChecks('built\n@@factory 0\nA hung', projects);
+  assert.equal(timedOut.tests.length, 1, 'steps after the unfinished one never ran');
   assert.equal(timedOut.tests[0].ok, false);
   assert.match(timedOut.tests[0].output, /A hung\nThis step didn't finish\./);
-  assert.equal(timedOut.tests[1].ok, false);
   assert.equal(splitChecks('dotnet ran for over 540 seconds', projects).build.ok, false);
+});
+
+test('the checks script runs the build, then each test project, with their own output', { skip: process.platform === 'win32' && 'needs a POSIX shell' }, t => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'checks-script-'));
+  t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
+  const log = path.join(bin, 'calls');
+  // A dotnet that records its arguments, writes to stderr and fails when its command line matches FAIL.
+  fs.writeFileSync(path.join(bin, 'dotnet'), `#!/bin/sh\nprintf '%s\\037' "$@" >> '${log}'; echo >> '${log}'\necho "ran $2" >&2\ncase "$*" in *"$FAIL"*) exit 1;; esac\n`, { mode: 0o755 });
+  const projects = ['tests/A b/A.UnitTests.csproj', 'B.ArchitectureTests.csproj', 'C.UnitTests.csproj'];
+  const checks = fail => {
+    fs.rmSync(log, { force: true });
+    const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, FAIL: fail };
+    const result = spawnSync('sh', ['-c', CHECKS_SCRIPT, 'checks', 'App.slnx', ...projects], { env, encoding: 'utf8' });
+    const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map(line => line.split('\x1f').slice(0, -1)) : [];
+    return { calls, ...splitChecks(result.stdout + result.stderr, projects) };
+  };
+
+  const green = checks('no-such-argument');
+  assert.deepEqual(green.calls, [buildArguments('./App.slnx'), ...projects.map(p => testArguments(`./${p}`))]);
+  assert.deepEqual(green.build, { ok: true, output: 'ran ./App.slnx\n' }, 'stderr stays with its step');
+  assert.deepEqual(green.tests.map(test => test.ok), [true, true, true]);
+  assert.match(green.tests[0].output, /ran \.\/tests\/A b\/A\.UnitTests\.csproj/);
+
+  const red = checks('build');
+  assert.equal(red.calls.length, 1, 'no tests run after a failed build');
+  assert.equal(red.build.ok, false);
+
+  const middle = checks('B.Architecture');
+  assert.deepEqual(middle.tests.map(test => test.ok), [true, false, true], 'a failing project does not stop the rest');
 });
 
 test('Docker gets the session environment without the runner file commands', () => {

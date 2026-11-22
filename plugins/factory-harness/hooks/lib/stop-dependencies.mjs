@@ -16,26 +16,30 @@ const MAX_SEARCH_DEPTH = 6;
 const BUILD_SECONDS = 300;
 const TEST_SECONDS = 120;
 
-const buildArguments = solution => ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'];
+export const buildArguments = solution => ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'];
 // Quiet verbosity hides assertion messages; the console logger at normal brings them back.
-const testArguments = project => ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
+export const testArguments = project => ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
 
 // In a container, the build and every test project run in one container: the packages the build
 // restores live only in that container's /tmp, so a second container's `dotnet test --no-build`
 // finds none, skips the project and exits 0. A status line follows each step. Code in the container
-// could print a fake one, but it could as easily make its own tests pass: CI is the gate. The
-// arguments match buildArguments and testArguments.
-const CHECKS_SCRIPT = `solution="$1"; shift
+// could print a fake one, but it could as easily make its own tests pass: CI is the gate. It's
+// POSIX sh, so an Alpine SDK image works too; stderr joins stdout, so each step's errors stay with
+// it; and paths start with ./, so none reads as an option. A test checks the arguments match
+// buildArguments and testArguments.
+export const CHECKS_SCRIPT = `exec 2>&1
+solution="./$1"; shift
 dotnet build "$solution" -warnaserror -nologo -v:q -clp:NoSummary
 status=$?; echo "@@factory $status"; [ "$status" -eq 0 ] || exit 0
 for project in "$@"; do
-  dotnet test "$project" --no-build -nologo -v:q --logger 'console;verbosity=normal'
+  dotnet test "./$project" --no-build -nologo -v:q --logger 'console;verbosity=normal'
   echo "@@factory $?"
 done`;
 
 /**
  * Splits the checks container's output at its status lines into the build's result and each test
- * project's. A step with no status line (the container timed out or died) failed.
+ * project's. The first step with no status line (the container timed out or died) failed, and the
+ * steps after it never ran, so they aren't reported.
  */
 export function splitChecks(output, projects) {
   const parts = output.split(/^@@factory (\d+)\r?$/m);
@@ -44,7 +48,8 @@ export function splitChecks(output, projects) {
   const unfinished = { ok: false, output: `${parts.at(-1)}\nThis step didn't finish.`.trim() };
   const build = steps[0] ?? unfinished;
   if (!build.ok) return { build, tests: [] };
-  return { build, tests: projects.map((_, i) => steps[i + 1] ?? unfinished) };
+  const tests = steps.slice(1, projects.length + 1);
+  return { build, tests: tests.length < projects.length ? [...tests, unfinished] : tests };
 }
 
 export function findTestProjects(root) {
@@ -117,7 +122,7 @@ export function createStopDependencies(env) {
     runBuildAndTests: (root, solution, projects) => {
       if (inContainer(env)) {
         removeLeftoverContainers({ env: dockerEnvironment(env) });
-        const result = dotnet(root, ['-c', CHECKS_SCRIPT, 'checks', solution, ...projects], BUILD_SECONDS + TEST_SECONDS * projects.length, { entrypoint: 'bash' });
+        const result = dotnet(root, ['-c', CHECKS_SCRIPT, 'checks', solution, ...projects], BUILD_SECONDS + TEST_SECONDS * projects.length, { entrypoint: 'sh' });
         return splitChecks(result.output, projects);
       }
       const build = dotnet(root, buildArguments(solution), BUILD_SECONDS);
