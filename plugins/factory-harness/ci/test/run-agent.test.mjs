@@ -40,10 +40,10 @@ function runFake(t, lines, { exit = 0, hang = false } = {}) {
 
 const fence = { maxTurns: 20, allowedTools: ['Read(./**)', 'Bash(git status *)'], deny: ['Read(//proc/**)'] };
 
-test('the arguments load the plugin, stream JSON, fence the tools and never use --bare', () => {
+test('the arguments load no settings files, load the plugin, stream JSON, fence the tools and never use --bare', () => {
   const args = agentArguments({ prompt: 'Do it', pluginDir, ...fence });
   assert.deepEqual(args, [
-    '-p', 'Do it', '--plugin-dir', pluginDir, '--output-format', 'stream-json', '--verbose',
+    '-p', 'Do it', '--setting-sources', '', '--plugin-dir', pluginDir, '--output-format', 'stream-json', '--verbose',
     '--permission-mode', 'dontAsk', '--max-turns', '20',
     '--allowedTools', 'Read(./**)', 'Bash(git status *)', '--disallowedTools', 'Read(//proc/**)',
   ]);
