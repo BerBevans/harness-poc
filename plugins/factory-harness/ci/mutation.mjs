@@ -3,7 +3,8 @@
 //
 // The harness chooses the files, not Stryker's own comparison with the target branch, because that
 // ignores changes to tests: a PR that only weakens an assertion would pass. Changing a core file
-// mutates the whole file. Changing a unit test project mutates every core project it references.
+// mutates the whole file, and changing a core project file mutates the whole project. Changing any
+// file in a unit test project, or moving one out of it, mutates every core project it references.
 //
 // Stryker only mutates a project that a test project references directly, so each core project is
 // tested by the unit test projects that reference it. *.Adapters projects aren't mutated: integration
@@ -35,17 +36,21 @@ const DETECTED = new Set(['Killed', 'Timeout']);
 const UNDETECTED = new Set(['Survived', 'NoCoverage']);
 const NEITHER = new Set(['CompileError', 'RuntimeError', 'Ignored']);
 
+const folderOf = record => `${path.dirname(normalise(record.path))}/`;
+const isProjectFile = file => /\.(csproj|props|targets)$/i.test(file);
+
 /** The record of the project a file belongs to: the one whose folder holds it most closely. */
 function owningProject(records, file) {
   const target = normalise(file);
   return records
-    .filter(record => target.startsWith(`${path.dirname(normalise(record.path))}/`))
-    .sort((a, b) => b.path.length - a.path.length)[0];
+    .filter(record => target.startsWith(folderOf(record)))
+    .sort((a, b) => folderOf(b).length - folderOf(a).length)[0];
 }
 
 /**
- * What to mutate, from the PR's changed files (as the API lists them: { filename, status }) and the
- * build-settings records. Returns one run per core project, sorted by name:
+ * What to mutate, from the PR's changed files (as the API lists them: { filename, status,
+ * previous_filename }) and the build-settings records. A renamed file counts at its old path too, as
+ * removed. Returns one run per core project, sorted by name:
  * { project, files: repo-relative paths, or null for the whole project, testProjects }.
  */
 export function selectRuns({ records, changedFiles, repoRoot }) {
@@ -57,12 +62,14 @@ export function selectRuns({ records, changedFiles, repoRoot }) {
     selected.set(project.path, run);
   };
 
-  for (const { filename, status } of changedFiles) {
-    if (!filename.endsWith('.cs')) continue;
+  const changes = changedFiles.flatMap(({ filename, status, previous_filename: previous }) =>
+    [{ filename, status }, ...(previous ? [{ filename: previous, status: 'removed' }] : [])]);
+  for (const { filename, status } of changes) {
     const project = owningProject(records, path.join(repoRoot, filename));
     if (!project) continue;
     // A deleted core file has nothing left to mutate, but a deleted test may have been the one that caught a mutant.
-    if (isCore(project) && status !== 'removed') select(project, filename);
+    if (isCore(project) && status !== 'removed' && filename.endsWith('.cs')) select(project, filename);
+    if (isCore(project) && isProjectFile(filename)) select(project, null);
     if (isUnitTests(project)) {
       for (const reference of project.references) {
         const referenced = records.find(record => normalise(record.path) === normalise(reference));
