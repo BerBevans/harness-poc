@@ -84,7 +84,7 @@ test('a suppression moved to another file passes', () => {
   assert.equal(scan(AGENT, files).passed, true);
 });
 
-test('one removed and two added fails, reporting both added', () => {
+test('one removed and two added fails, reporting the one left over', () => {
   const files = [
     diff('src/A.cs', ['-#pragma warning disable CA1822']),
     diff('src/B.cs', ['+#pragma warning disable CA1822']),
@@ -92,7 +92,7 @@ test('one removed and two added fails, reporting both added', () => {
   ];
   const result = scan(AGENT, files);
   assert.equal(result.passed, false);
-  assert.deepEqual(result.lines.slice(0, 2).map(l => l.split('::')[1]), ['error file=src/B.cs,line=1', 'error file=src/C.cs,line=1']);
+  assert.deepEqual(result.lines.slice(0, -1).map(l => l.split('::')[1]), ['error file=src/C.cs,line=1']);
 });
 
 test('a different suppression removed does not pay for one added', () => {
@@ -104,16 +104,47 @@ test('a suppression split across lines is still caught', () => {
   const file = diff('tests/ATests.cs', ['+[Test,', '+ Ignore]']);
   const result = scan(AGENT, [file]);
   assert.equal(result.passed, false);
-  assert.match(result.lines[0], /line=1::Adds a suppression: \[Ignore\]/);
+  assert.match(result.lines[0], /line=2::Adds a suppression: \[Ignore\]/);
 });
 
-test('generated code and other file types are not scanned', () => {
-  const files = [
-    diff('src/obj/Debug/A.cs', ['+#pragma warning disable']),
-    diff('src/A.Designer.cs', ['+#pragma warning disable']),
-    diff('docs/suppressions.md', ['+Never write #pragma warning disable.']),
-  ];
-  assert.equal(scan(AGENT, files).passed, true);
+test('files named like generated code are scanned; other file types are not', () => {
+  assert.equal(scan(AGENT, [diff('src/A.Designer.cs', ['+#pragma warning disable'])]).passed, false);
+  assert.equal(scan(AGENT, [diff('src/Model.g.cs', ['+[ExcludeFromCodeCoverage]'])]).passed, false);
+  assert.equal(scan(AGENT, [diff('docs/suppressions.md', ['+Never write #pragma warning disable.'])]).passed, true);
+});
+
+test('only the EF Core pragma passes, and only in a migration designer file or snapshot', () => {
+  const ef = '+#pragma warning disable 612, 618';
+  assert.equal(scan(AGENT, [diff('src/Data/Migrations/1_Init.Designer.cs', [ef])]).passed, true);
+  assert.equal(scan(AGENT, [diff('src/Data/Migrations/AppModelSnapshot.cs', [ef])]).passed, true);
+  assert.equal(scan(AGENT, [diff('src/Data/Migrations/1_Init.Designer.cs', [`${ef}, CA1822`])]).passed, false);
+  assert.equal(scan(AGENT, [diff('src/Data/Init.Designer.cs', [ef])]).passed, false);
+});
+
+test('widening or swapping a suppression fails, pointing at the new line', () => {
+  const widened = scan(AGENT, [diff('src/A.cs', ['-#pragma warning disable CA1822', '+#pragma warning disable CA1822, CA2000'])]);
+  assert.equal(widened.passed, false);
+  assert.match(widened.lines[0], /file=src\/A\.cs,line=1::Adds a suppression: #pragma warning disable/);
+  assert.equal(scan(AGENT, [diff('src/A.cs', ['-#pragma warning disable CA1822', '+#pragma warning disable S3776'])]).passed, false);
+  assert.equal(scan(AGENT, [diff('src/A.cs', ['-  #pragma   warning disable CA1822', '+#pragma warning disable CA1822'])]).passed, true);
+});
+
+test('a removed restore fails, unless an equal one is added, as when moving it', () => {
+  const removed = scan(AGENT, [diff('src/A.cs', ['-#pragma warning restore CA1822'])]);
+  assert.equal(removed.passed, false);
+  assert.match(removed.lines[0], /file=src\/A\.cs::Removes a #pragma warning restore/);
+  assert.equal(scan(AGENT, [diff('src/A.cs', ['-#pragma warning restore CA1822', ' x', '+#pragma warning restore CA1822'])]).passed, true);
+});
+
+test('a restore moved to another file, or a removed nullable restore, fails', () => {
+  const moved = [diff('src/A.cs', ['-#pragma warning restore CA1822']), diff('src/B.cs', ['+#pragma warning restore CA1822'])];
+  assert.equal(scan(AGENT, moved).passed, false);
+  assert.equal(scan(AGENT, [diff('src/A.cs', ['-#nullable restore'])]).passed, false);
+});
+
+test('a Compile item in a project file and a pragma in Razor fail', () => {
+  assert.equal(scan(AGENT, [diff('src/App/App.csproj', ['+<Compile Include="notes.txt" />'])]).passed, false);
+  assert.equal(scan(AGENT, [diff('src/Web/Index.razor', ['+@{ #pragma warning disable CS8602 }'])]).passed, false);
 });
 
 test('the owner and Dependabot are exempt', () => {

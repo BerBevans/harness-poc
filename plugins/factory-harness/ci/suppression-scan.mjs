@@ -2,10 +2,15 @@
 // weakening properties to project files, unless its author is exempt: the people named in
 // EXEMPT_USER_IDS, and Dependabot.
 //
-// It counts across the whole PR: for each rule, occurrences in added lines against occurrences
-// in removed lines. Moving a method and its suppression to another file is therefore allowed.
+// It compares across the whole PR: for each rule, the added lines it matches against the removed
+// lines it matches, as whole lines with whitespace normalised. Moving a suppression to another file
+// is therefore allowed (though not its restore, see below); widening or swapping one isn't.
+// A removed `#pragma warning restore` or `#nullable restore`/`enable` with no equal one added to the
+// same file fails too.
 
-import { kindOf, suppressionRulesFor } from '../hooks/rules/suppressions.mjs';
+import {
+  CODE_SUPPRESSIONS, kindOf, lineMatcher, normaliseLine, RESTORE, suppressionRulesFor, unmatched,
+} from '../hooks/rules/suppressions.mjs';
 import { normalisePath } from '../hooks/lib/paths.mjs';
 import { annotation, exemptResult, incompleteListing, isExempt, runIfMain, runOnPullRequest } from './lib/pull-request.mjs';
 
@@ -23,14 +28,17 @@ const DESCRIPTIONS = {
   'coverage-exclusion': name => `Excludes code from coverage: ${name}.`,
   'suppression': name => `Adds a suppression: ${name}.`,
 };
+const describeRestore = () => 'Removes a #pragma warning restore or #nullable restore, which widens a suppression to the end of the file.';
 const describe = name => DESCRIPTIONS[kindOf(name)](name);
 
 /**
  * Splits a unified diff hunk list, as the API's `patch` field gives it, into added and removed text.
- * `lineStarts` maps each added line's offset in `addedText` to its line number in the new file.
+ * `lineStarts` maps each added line's offset in `addedText` to its line number in the new file;
+ * `addedLines` pairs each added line with its line number.
  */
 export function parsePatch(patch) {
   const added = [];
+  const addedLines = [];
   const lineStarts = [];
   const removed = [];
   let newLine = 0;
@@ -43,6 +51,7 @@ export function parsePatch(patch) {
     } else if (line.startsWith('+')) {
       lineStarts.push({ offset, line: newLine });
       added.push(line.slice(1));
+      addedLines.push({ text: line.slice(1), line: newLine });
       offset += line.length; // the text without '+', plus the joining newline
       newLine++;
     } else if (line.startsWith('-')) {
@@ -51,17 +60,7 @@ export function parsePatch(patch) {
       newLine++; // a context line
     }
   }
-  return { addedText: added.join('\n'), removedText: removed.join('\n'), lineStarts };
-}
-
-// The line number of the added line that holds the character at `index`.
-function lineAt(lineStarts, index) {
-  let found = lineStarts[0];
-  for (const start of lineStarts) {
-    if (start.offset > index) break;
-    found = start;
-  }
-  return found.line;
+  return { addedText: added.join('\n'), removedText: removed.join('\n'), lineStarts, addedLines, removedLines: removed };
 }
 
 // Files whose diff we must see: any file a suppression rule applies to that gains lines.
@@ -85,28 +84,38 @@ export function evaluate({ author, files, changedFileCount, exemptUserIds }) {
     };
   }
 
-  // For each rule: where it appears in added lines, and how often it appears in removed lines.
+  // For each rule: the added lines it matches, with where they are, and the removed lines it matches.
   const tally = new Map();
+  const restores = { added: [], removed: [] };
   for (const file of files) {
-    const rules = suppressionRulesFor(normalisePath(file.filename));
+    const path = normalisePath(file.filename);
+    const rules = suppressionRulesFor(path);
     if (rules.length === 0 || typeof file.patch !== 'string') continue;
-    const { addedText, removedText, lineStarts } = parsePatch(file.patch);
+    const { addedLines, removedLines } = parsePatch(file.patch);
+    const added = addedLines.map(({ text, line }) => ({ text: normaliseLine(text), path: file.filename, line }));
+    const removed = removedLines.map(normaliseLine);
     for (const rule of rules) {
-      const entry = tally.get(rule.name) ?? { added: [], removedCount: 0 };
-      for (const match of addedText.matchAll(rule.pattern)) {
-        entry.added.push({ path: file.filename, line: lineAt(lineStarts, match.index) });
-      }
-      entry.removedCount += (removedText.match(rule.pattern) ?? []).length;
+      const counts = lineMatcher(rule, path);
+      const entry = tally.get(rule.name) ?? { added: [], removed: [] };
+      entry.added.push(...added.filter(a => counts(a.text)));
+      entry.removed.push(...removed.filter(counts));
       tally.set(rule.name, entry);
+    }
+    if (rules === CODE_SUPPRESSIONS) {
+      const counts = lineMatcher(RESTORE, path);
+      restores.added.push(...added.filter(a => counts(a.text)).map(a => `${file.filename}\0${a.text}`));
+      restores.removed.push(...removed.filter(counts).map(text => ({ text, path: file.filename })));
     }
   }
 
-  const failures = [...tally].filter(([, entry]) => entry.added.length > entry.removedCount);
-  if (failures.length === 0) return { passed: true, lines: ['No new suppressions.'] };
-
-  // We can't tell which occurrence is the new one, so every added occurrence is reported.
-  const lines = failures.flatMap(([name, entry]) =>
-    entry.added.map(({ path, line }) => annotation(path, describe(name), line)));
+  // Each added line is paired off with an equal removed line; those left over are new.
+  const text = item => item.text;
+  const lines = [
+    ...[...tally].flatMap(([name, entry]) => unmatched(entry.added, entry.removed, text)
+      .map(({ path, line }) => annotation(path, describe(name), line))),
+    ...unmatched(restores.removed, restores.added, r => `${r.path}\0${r.text}`).map(({ path }) => annotation(path, describeRestore())),
+  ];
+  if (lines.length === 0) return { passed: true, lines: ['No new suppressions.'] };
   return { passed: false, lines: [...lines, FIX] };
 }
 
