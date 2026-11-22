@@ -31,6 +31,10 @@ decisionTable({
     ['a background job', bash('true & rm .github/workflows/ci.yml')],
     ['sh -c with a separator inside the quotes', bash("sh -c 'cd src; git push --force'")],
     ['pwsh -Command', bash('pwsh -Command "git reset --hard"')],
+    ['pwsh -NonInteractive -Command', bash('pwsh -NonInteractive -Command "git push --force"')],
+    ['pwsh -ExecutionPolicy Bypass -Command', bash('pwsh -ExecutionPolicy Bypass -Command "git reset --hard"')],
+    ['an escaped quote outside quotes', bash("echo it\\'s; git push --force")],
+    ['process substitution', bash('cat <(git reset --hard)')],
     ['a write inside bash -c', bash('bash -c "echo x > .github/workflows/ci.yml"')],
     ['substitution inside bash -c', bash('bash -c "echo $(git reset --hard)"')],
     ['linking to a guarded file', bash('ln -s ../Directory.Build.props src/settings.props')],
@@ -91,5 +95,5 @@ test('on disk, a write through a dangling link to a guarded path is blocked', t 
   const context = createContext({});
   const input = { tool_name: 'Write', tool_input: { file_path: path.join(repo, 'notes.yml'), content: 'on: push' }, cwd: repo };
   assert.match(evaluate(input, context), /is a guardrail file/);
-  assert.match(evaluate({ tool_name: 'Bash', tool_input: { command: 'cat notes.yml > x' }, cwd: repo }, context) ?? 'allowed', /allowed/);
+  assert.equal(evaluate({ tool_name: 'Bash', tool_input: { command: 'cat notes.yml > x' }, cwd: repo }, context), null);
 });

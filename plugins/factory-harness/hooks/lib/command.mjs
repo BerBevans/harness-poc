@@ -15,6 +15,7 @@ function splitOutsideQuotes(command) {
     const char = command[i];
     if (quote === '"' && char === '\\') { current += char + (command[++i] ?? ''); continue; }
     if (quote) { if (char === quote) quote = null; current += char; continue; }
+    if (char === '\\') { current += char + (command[++i] ?? ''); continue; }
     if (char === '"' || char === "'") { quote = char; current += char; continue; }
     const separatingAmpersand = char === '&' && !/[<>]/.test(command[i - 1] ?? '') && command[i + 1] !== '>';
     if (char === ';' || char === '|' || char === '\n' || separatingAmpersand) {
@@ -28,9 +29,9 @@ function splitOutsideQuotes(command) {
   return [...parts, current];
 }
 
-// The bodies of $(...) and backtick substitutions, which run as commands of their own.
+// The bodies of $(...), <(...), >(...) and backtick substitutions, which run as commands of their own.
 const substitutions = command =>
-  [...command.matchAll(/\$\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`/g)].map(match => match[1] ?? match[2]);
+  [...command.matchAll(/[$<>]\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`/g)].map(match => match[1] ?? match[2]);
 
 /**
  * Every simple command in a command line: split on separators outside quotes, with subshell and
@@ -47,9 +48,14 @@ export function splitSegments(command, depth = 0) {
     segments.push(segment);
     const tokens = tokenise(segment);
     const shell = tokens.findIndex(t => SHELLS.has(programName(t)));
-    // -c anywhere in a short-option cluster (bash -lc, sh -ec), or pwsh -Command, or cmd /c.
-    const flag = shell >= 0 ? tokens.findIndex((t, i) => i > shell && /^(-[a-z]*c[a-z]*|-command|\/c)$/i.test(t)) : -1;
-    if (flag >= 0 && tokens[flag + 1]) segments.push(...splitSegments(unquote(tokens[flag + 1]), depth + 1));
+    // -c anywhere in a short-option cluster (bash -lc, sh -ec), pwsh -Command, or cmd /c. The
+    // argument after every such option is followed: pwsh -NonInteractive matches too, and
+    // following its neighbour as a command is harmless.
+    if (shell >= 0) {
+      tokens.forEach((t, i) => {
+        if (i > shell && tokens[i + 1] && /^(-[a-z]*c[a-z]*|\/c)$/i.test(t)) segments.push(...splitSegments(unquote(tokens[i + 1]), depth + 1));
+      });
+    }
   }
   return segments;
 }
