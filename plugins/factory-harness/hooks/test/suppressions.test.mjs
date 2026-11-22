@@ -54,6 +54,12 @@ decisionTable({
     ['VSTestCLIRunSettings', addToProject('<VSTestCLIRunSettings>x</VSTestCLIRunSettings>')],
     ['TestingPlatformCommandLineArguments', addToProject('<TestingPlatformCommandLineArguments>--filter x</TestingPlatformCommandLineArguments>')],
     ['import of a file not named .props or .targets', edit(project, '<ItemGroup>', '<Import Project="relaxed.xml" />\n<ItemGroup>')],
+    ['import with Sdk= inside another attribute', edit(project, '<ItemGroup>', '<Import Project="relaxed.xml" Label="Sdk=x" />\n<ItemGroup>')],
+    ['import with a .props name inside another attribute', edit(project, '<ItemGroup>', '<Import Label="Project=\'a.props\'" Project="relaxed.xml" />\n<ItemGroup>')],
+    ['import of a list ending in .props', edit(project, '<ItemGroup>', '<Import Project="relaxed.xml;x.props" />\n<ItemGroup>')],
+    // Fails safe: only Directory.Build.props uses it, which the owner edits, and the scan exempts the owner.
+    ['import through a property function', edit(project, '<ItemGroup>', '<Import Project="$([MSBuild]::GetPathOfFileAbove(\'Directory.Build.props\', \'$(MSBuildThisFileDirectory)../\'))" />\n<ItemGroup>')],
+    ['import with only an Sdk', edit(project, '<ItemGroup>', '<Import Sdk="Some.Sdk" Version="1.0" Project="../../relaxed.xml" />\n<ItemGroup>')],
     ['property in an imported props file', write(`${REPO}\\build\\relaxed.props`, '<Project><PropertyGroup><NoWarn>CS1591</NoWarn></PropertyGroup></Project>')],
     ['[GeneratedCode] in hand-written code', edit(code, 'a', '[GeneratedCode("tool", "1.0")]')],
     ['[CompilerGenerated]', edit(code, 'a', '[System.Runtime.CompilerServices.CompilerGenerated]')],

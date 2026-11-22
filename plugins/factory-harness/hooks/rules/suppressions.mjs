@@ -65,8 +65,13 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   // settings targets.
   { name: 'TreatAsLocalProperty', pattern: /\bTreatAsLocalProperty\s*=/gi },
   // The rules here read only .csproj, .props and .targets files, and MSBuild imports a file of any
-  // name, so an import must name one of those (or an Sdk), or its settings go unread.
-  { name: 'Import of a file not named .props or .targets', pattern: /<\s*Import\b(?![^>]*\bProject\s*=\s*["'][^"']*\.(?:props|targets)["'])(?![^>]*\bSdk\s*=)/gi },
+  // name, so an import's Project attribute must name one .props or .targets file. The attributes are
+  // walked one by one, so text inside another attribute's value can't satisfy it, and a ; (which
+  // MSBuild splits on) isn't allowed. An import split across lines is blocked; it fails safe.
+  {
+    name: 'Import of a file not named .props or .targets',
+    pattern: /<\s*Import\b(?!(?:\s+(?!Project\b)[\w.:-]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s+Project\s*=\s*(?:"[^";]*\.(?:props|targets)"|'[^';]*\.(?:props|targets)'))/gi,
+  },
   // SDK projects compile every .cs file already. An explicit Compile item can add a file that isn't
   // .cs (so the scan never reads it as code) or remove code from the build.
   { name: 'Compile item', pattern: /<\s*Compile\b/gi },
