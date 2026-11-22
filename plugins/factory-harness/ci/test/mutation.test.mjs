@@ -20,8 +20,8 @@ const integrationTests = project('tests', 'App.IntegrationTests', { isTestProjec
 const records = [app, domain, adapters, unitTests, domainTests, integrationTests];
 
 const changed = (...filenames) => filenames.map(filename => {
-  const [name, status = 'modified'] = filename.split(':');
-  return { filename: name, status };
+  const [name, status = 'modified', previous] = filename.split(':');
+  return { filename: name, status, ...(previous && { previous_filename: previous }) };
 });
 const select = (...filenames) => selectRuns({ records, changedFiles: changed(...filenames), repoRoot: root })
   .map(run => ({ project: run.project.assemblyName, files: run.files, tests: run.testProjects.map(t => t.assemblyName) }));
@@ -45,9 +45,32 @@ test('a deleted unit test counts as a test change, but a deleted core file has n
   ]);
 });
 
-test('adapters, integration tests, non-C# files and files outside any project are left alone', () => {
-  assert.deepEqual(select('src/App.Adapters/Store.cs', 'tests/App.IntegrationTests/StoreTests.cs', 'src/App/App.csproj',
+test('adapters, integration tests, other files in a core project and files outside any project are left alone', () => {
+  assert.deepEqual(select('src/App.Adapters/Store.cs', 'src/App.Adapters/App.Adapters.csproj', 'tests/App.IntegrationTests/StoreTests.cs',
     'src/App/appsettings.json', 'docs/notes.cs', 'build/Tool.cs'), []);
+});
+
+test('a changed core project file mutates the whole project', () => {
+  assert.deepEqual(select('src/App/App.csproj', 'src/App/Program.cs'), [{ project: 'App', files: null, tests: ['App.UnitTests'] }]);
+});
+
+test('any changed file in a unit test project, such as its project file, mutates what it references', () => {
+  assert.deepEqual(select('tests/App.Domain.UnitTests/App.Domain.UnitTests.csproj', 'tests/App.Domain.UnitTests/cases.json').map(run => run.project),
+    ['App.Domain']);
+});
+
+test('a test moved out of a unit test project counts as removed from it', () => {
+  assert.deepEqual(select('docs/PriceTests.cs:renamed:tests/App.Domain.UnitTests/PriceTests.cs'), [
+    { project: 'App.Domain', files: null, tests: ['App.UnitTests', 'App.Domain.UnitTests'] },
+  ]);
+  assert.deepEqual(select('src/App/Order.cs:renamed:src/App/Old.cs'), [{ project: 'App', files: ['src/App/Order.cs'], tests: ['App.UnitTests'] }]);
+});
+
+test('a file belongs to the project in the nearest folder, however long the project file names are', () => {
+  const outer = { ...app, path: path.join(root, 'src/App/AVeryLongProjectFileNameIndeed.csproj') };
+  const inner = { ...project('src/App', 'X'), path: path.join(root, 'src/App/X/X.csproj') };
+  const runs = selectRuns({ records: [outer, inner, unitTests], changedFiles: changed('src/App/X/Thing.cs'), repoRoot: root });
+  assert.deepEqual(runs.map(run => run.project.assemblyName), ['X']);
 });
 
 test('a project in a folder nested inside another belongs to the nearer project', () => {
