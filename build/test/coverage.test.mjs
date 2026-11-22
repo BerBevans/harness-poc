@@ -114,6 +114,22 @@ describe('coverage measurement', { timeout: 600_000 }, () => {
     assert.deepEqual(figure.core.lines, { covered: 3, valid: 4 });
   });
 
+  test('a test filter or run settings set only for dotnet test leave nothing out', () => {
+    const testProject = path.join(repo, 'tests/Consumer.UnitTests/Consumer.UnitTests.csproj');
+    const original = fs.readFileSync(testProject, 'utf8');
+    writeFile('tests/Consumer.UnitTests/skip.runsettings',
+      '<RunSettings><DataCollectionRunSettings><DataCollectors><DataCollector friendlyName="Code Coverage"><Configuration><CodeCoverage><ModulePaths><Exclude><ModulePath>.*Consumer\\.dll$</ModulePath></Exclude></ModulePaths></CodeCoverage></Configuration></DataCollector></DataCollectors></DataCollectionRunSettings></RunSettings>');
+    fs.writeFileSync(testProject, original.split('</Project>').join(
+      "  <PropertyGroup Condition=\"'$(VSTestNoBuild)' == 'true'\">\n    <VSTestTestCaseFilter>FullyQualifiedName~Nothing</VSTestTestCaseFilter>\n    <RunSettingsFilePath>$(MSBuildThisFileDirectory)skip.runsettings</RunSettingsFilePath>\n  </PropertyGroup>\n</Project>"));
+    try {
+      const { figure, unmeasured } = measureCoverage();
+      assert.deepEqual(unmeasured, []);
+      assert.ok(figure.core.lines.covered > 0, JSON.stringify(figure.core));
+    } finally {
+      fs.writeFileSync(testProject, original);
+    }
+  });
+
   test('a product project no test loads fails, since it would not count at all', () => {
     const project = fs.readFileSync(path.join(repo, 'src/Consumer/Consumer.csproj'), 'utf8');
     writeFile('src/Orphan/Orphan.csproj', project);

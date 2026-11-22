@@ -109,6 +109,13 @@ describe('build settings target', { timeout: 600_000 }, () => {
     for (const level of ['latest', '10.0', 'latest-all']) assert.equal(build(`-p:AnalysisLevel=${level}`).status, 0, level);
   });
 
+  test('an AnalysisLevel for a single category is caught', () => {
+    addToProject('  <PropertyGroup><AnalysisLevelSecurity>none</AnalysisLevelSecurity></PropertyGroup>');
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    assert.match(output, /error FH0001: AnalysisLevel is set for Security;/);
+  });
+
   test('a test filter, CLI run settings or runner arguments in a project are caught', () => {
     for (const property of ['VSTestTestCaseFilter', 'VSTestCLIRunSettings', 'TestingPlatformCommandLineArguments']) {
       addToProject(`  <PropertyGroup><${property}>Category!=Slow</${property}></PropertyGroup>`);

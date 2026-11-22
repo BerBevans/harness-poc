@@ -70,14 +70,32 @@
       Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
       Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
     <!--
-      The SDK's defaults follow the target framework: on net10.0, WarningLevel 10 and analysis level
-      10.0. A lower WarningLevel silences warning waves, a lower AnalysisLevel (none counts as 4.0)
-      drops newer rules, and an AnalysisLevel suffix (latest-minimum) chooses the rule set in place
-      of AnalysisMode.
+      On .NET (Core), the SDK's defaults follow the target framework: on net10.0, WarningLevel 10 and
+      analysis level 10.0. A lower WarningLevel silences warning waves, a lower AnalysisLevel (none
+      counts as 4.0) drops newer rules, and an AnalysisLevel suffix (latest-minimum) chooses the rule
+      set in place of AnalysisMode. .NET Framework's default WarningLevel is 4, so other frameworks
+      are held to that. Each category can be given its own level, as AnalysisLevel<Category>, which
+      the SDK resolves only in a target and defaults to AnalysisLevel, so it must be that.
     -->
     <PropertyGroup>
-      <_FactoryFrameworkVersion>$(TargetFrameworkVersion.TrimStart('v'))</_FactoryFrameworkVersion>
+      <_FactoryFrameworkVersion Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp'">$(TargetFrameworkVersion.TrimStart('v'))</_FactoryFrameworkVersion>
+      <_FactoryFrameworkVersion Condition="'$(_FactoryFrameworkVersion)' == ''">4</_FactoryFrameworkVersion>
     </PropertyGroup>
+    <ItemGroup>
+      <_FactoryCategoryLevel Include="Design" Condition="'$(AnalysisLevelDesign)' != '' and '$(AnalysisLevelDesign)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Documentation" Condition="'$(AnalysisLevelDocumentation)' != '' and '$(AnalysisLevelDocumentation)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Globalization" Condition="'$(AnalysisLevelGlobalization)' != '' and '$(AnalysisLevelGlobalization)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Interoperability" Condition="'$(AnalysisLevelInteroperability)' != '' and '$(AnalysisLevelInteroperability)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Maintainability" Condition="'$(AnalysisLevelMaintainability)' != '' and '$(AnalysisLevelMaintainability)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Naming" Condition="'$(AnalysisLevelNaming)' != '' and '$(AnalysisLevelNaming)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Performance" Condition="'$(AnalysisLevelPerformance)' != '' and '$(AnalysisLevelPerformance)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Reliability" Condition="'$(AnalysisLevelReliability)' != '' and '$(AnalysisLevelReliability)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Security" Condition="'$(AnalysisLevelSecurity)' != '' and '$(AnalysisLevelSecurity)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="SingleFile" Condition="'$(AnalysisLevelSingleFile)' != '' and '$(AnalysisLevelSingleFile)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Style" Condition="'$(AnalysisLevelStyle)' != '' and '$(AnalysisLevelStyle)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Trimming" Condition="'$(AnalysisLevelTrimming)' != '' and '$(AnalysisLevelTrimming)' != '$(AnalysisLevel)'" />
+      <_FactoryCategoryLevel Include="Usage" Condition="'$(AnalysisLevelUsage)' != '' and '$(AnalysisLevelUsage)' != '$(AnalysisLevel)'" />
+    </ItemGroup>
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(WarningLevel)' == '' or $([MSBuild]::VersionLessThan('$(WarningLevel)', '$(_FactoryFrameworkVersion)'))"
       Text="WarningLevel is '$(WarningLevel)'; it must be at least the SDK's default for $(TargetFramework), $(_FactoryFrameworkVersion). $(_FactoryFix)" />
@@ -87,6 +105,9 @@
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(AnalysisLevelSuffix)' != '' and '$(AnalysisLevelSuffix)' != 'all'"
       Text="AnalysisLevel is '$(AnalysisLevel)'; its suffix chooses the rule set in place of AnalysisMode All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'@(_FactoryCategoryLevel)' != ''"
+      Text="AnalysisLevel is set for @(_FactoryCategoryLevel, ', '); each category must take the project's AnalysisLevel, '$(AnalysisLevel)'. $(_FactoryFix)" />
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(EnableNETAnalyzers)' == 'false'"
       Text="EnableNETAnalyzers is false, which removes the CA analysers. $(_FactoryFix)" />
@@ -147,7 +168,8 @@
       Text="Rule severities may come only from .editorconfig and .globalconfig files; this project adds @(_FactoryForeignAnalyzerConfig, ', '). $(_FactoryFix)" />
     <!--
       Run settings can exclude code from coverage, and a test filter or runner arguments can leave
-      tests out unseen, so a project may not choose its own. CI also passes each as empty.
+      tests out unseen, so a project may not choose its own. CI also passes each as empty, since a
+      project can set one for `dotnet test` alone, which the build never sees.
     -->
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunSettingsFilePath)' != ''"
