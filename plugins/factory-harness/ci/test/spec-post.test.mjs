@@ -31,9 +31,9 @@ test('good files are read and trimmed', t => {
 test('missing, extra or malformed files are a problem', t => {
   const cases = [
     [{ 'comment.md': null }, /didn't write comment\.md/],
-    [{ 'notes.txt': 'x' }, /wrote files it shouldn't have \(notes\.txt\)/],
+    [{ 'notes.txt': 'x' }, /wrote 1 file it shouldn't have$/],
     [{ 'outcome.json': 'not json' }, /isn't valid JSON/],
-    [{ 'outcome.json': '{ "outcome": "done", "estimatedLines": 1 }' }, /"done" isn't one of/],
+    [{ 'outcome.json': '{ "outcome": "done", "estimatedLines": 1 }' }, /the outcome isn't one of/],
     [{ 'outcome.json': '{ "outcome": "complete", "estimatedLines": "lots" }' }, /isn't a whole number/],
     [{ 'outcome.json': '{ "outcome": "complete", "estimatedLines": 251 }' }, /complete at about 251 lines, over the 250-line target, so the outcome must be split/],
     [{ 'spec.md': '  \n' }, /spec is empty/],
@@ -118,6 +118,23 @@ test('a failed agent run or a bad file leaves the body alone and posts only a fa
     assert.deepEqual(api.calls.map(call => call.method), ['POST']);
     assert.equal(api.calls[0].body, failureComment(problem));
   }
+});
+
+test('a failure comment never quotes the agent\'s file names or outcome', async t => {
+  for (const files of [{ [`${TOKEN}.txt`]: 'x' }, { 'outcome.json': JSON.stringify({ outcome: TOKEN, estimatedLines: 1 }) }]) {
+    const api = fakeApi();
+    await run({ dir: runFolder(t, files), env: env(), fetchImpl: api.fetchImpl });
+    assert.deepEqual(api.calls.map(call => call.method), ['POST']);
+    assert.ok(!api.calls[0].body.includes(TOKEN));
+  }
+});
+
+test('a spec that fits but takes the body over GitHub\'s limit with the original request posts only a failure comment', async t => {
+  const api = fakeApi('x'.repeat(20000));
+  const result = await run({ dir: runFolder(t, { 'spec.md': 'y'.repeat(49000) }), env: env(), fetchImpl: api.fetchImpl });
+  assert.equal(result.passed, false);
+  assert.deepEqual(api.calls.map(call => call.method), ['GET', 'POST']);
+  assert.match(api.calls[1].body, /over GitHub's 65536-character limit/);
 });
 
 test('the OTLP headers line yields the header value, its Base64 part, the decoded pair and the password', () => {

@@ -32,6 +32,13 @@ import { runIfMain } from './lib/pull-request.mjs';
 export const CLAUDE_CODE_VERSION = '2.1.310';
 export const PLUGIN_NAME = 'factory-harness';
 
+// The runner's file commands. Code the agent runs could append to them and change later steps in
+// the job, including ones that hold a token, so the agent never learns where they are.
+export const RUNNER_FILE_COMMANDS = ['GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_OUTPUT', 'GITHUB_STATE', 'GITHUB_STEP_SUMMARY'];
+
+export const withoutRunnerFileCommands = env =>
+  Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
+
 /** Installs the pinned Claude Code into `toolDir`, unless it's there already. Returns the command to run. */
 export function installClaudeCode(toolDir, runNpm = args => spawnSync('npm', args, { encoding: 'utf8' })) {
   const command = path.join(toolDir, 'node_modules', '.bin', 'claude');
@@ -44,11 +51,19 @@ export function installClaudeCode(toolDir, runNpm = args => spawnSync('npm', arg
 // Tools that must name a path or command in an allow rule. A bare rule allows them everywhere.
 const UNFENCED_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit'];
 
+// A bare tool, or a specifier with nothing left once wildcards, slashes, `~` and the legacy `:*`
+// prefix suffix are removed: Bash(:*), Read(//**/*) and Read(~) all reach everything.
+const grantsEverything = rule => {
+  if (UNFENCED_TOOLS.includes(rule)) return true;
+  const specifier = /^\w+\((.*)\)$/s.exec(rule)?.[1];
+  return specifier !== undefined && specifier.replace(/:\*|[*/~\s]/g, '') === '';
+};
+
 /** Parses the role's allow rules, one per line. Throws on a rule that grants a tool everywhere. */
 export function parseAllowedTools(text) {
   const rules = String(text ?? '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
   if (rules.length === 0) throw new Error('AGENT_ALLOWED_TOOLS is empty. List the tools the role needs.');
-  const bare = rules.find(rule => UNFENCED_TOOLS.includes(rule) || /\(\s*(\/\/|~\/|\/)?\*{0,2}\s*\)$/.test(rule));
+  const bare = rules.find(grantsEverything);
   if (bare) throw new Error(`"${bare}" allows the tool everywhere. Name a path, such as Read(./**), or a command.`);
   return rules;
 }
@@ -278,7 +293,7 @@ await runIfMain(import.meta.url, async env => {
     allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
     deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
   });
-  const telemetry = telemetryEnvironment(env);
+  const telemetry = telemetryEnvironment(withoutRunnerFileCommands(env));
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   const result = await runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env: telemetry.env });
   return { ...result, lines: [telemetry.summary, ...result.lines] };
