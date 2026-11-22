@@ -27,6 +27,16 @@ nuget.config                    @harness-owner
 NuGet.config                    @harness-owner
 NuGet.Config                    @harness-owner
 global.json                     @harness-owner
+Directory.Build.rsp             @harness-owner
+MSBuild.rsp                     @harness-owner
+Directory.Solution.props        @harness-owner
+Directory.Solution.targets      @harness-owner
+*.csproj.user                   @harness-owner
+*.fsproj.user                   @harness-owner
+*.vbproj.user                   @harness-owner
+*proj.user                      @harness-owner
+before.*.targets                @harness-owner
+after.*.targets                 @harness-owner
 **/.config/dotnet-tools.json    @harness-owner
 stryker-config.json             @harness-owner
 stryker-config.yml              @harness-owner
@@ -43,6 +53,7 @@ Containerfile.*                 @harness-owner
 .github/                        @harness-owner
 .claude/                        @harness-owner
 deploy/                         @harness-owner
+obj/                            @harness-owner
 *.ArchitectureTests/            @harness-owner
 
 # Product and architecture docs. Agents may propose changes; the owner approves them.
