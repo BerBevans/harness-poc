@@ -12,6 +12,12 @@ const GUARDRAIL_FILE_NAMES = new Set([
   'directory.packages.props',
   'nuget.config',
   'global.json',
+  // MSBuild loads these on its own: response files add switches to every build, and the solution
+  // files wrap every project in a solution build.
+  'directory.build.rsp',
+  'msbuild.rsp',
+  'directory.solution.props',
+  'directory.solution.targets',
 ]);
 // `deploy` holds the reference copy of the server setup: the Compose file, the deploy scripts and
 // the sudo rule. It's matched at any depth, like the others, because the hook can't tell where the
@@ -42,6 +48,9 @@ export function isGuardrailPath(normalisedPath, home, { allowArchitectureTests =
     || name.endsWith('.runsettings')
     || /^stryker-config\.(json|ya?ml)$/.test(name)
     || isContainerBuildFile(name)
+    // Microsoft.Common.targets imports <project>.user, and a solution build imports before.<sln>.targets and after.<sln>.targets.
+    || /\.[a-z]+proj\.user$/.test(name)
+    || /^(before|after)\..+\.slnx?\.targets$/.test(name)
     || normalisedPath.endsWith('.config/dotnet-tools.json')
     || parts.some(part => GUARDRAIL_FOLDERS.has(part))
     || (!allowArchitectureTests && parts.some(part => part.endsWith('.architecturetests')));
