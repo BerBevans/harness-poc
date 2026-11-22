@@ -1,7 +1,7 @@
 // Turns a PreToolUse input into the shape every rule checks: what tool, which paths,
 // which command, and what text is being added or removed.
 
-import { expandHome } from './paths.mjs';
+import { pathForms } from './paths.mjs';
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
@@ -39,7 +39,7 @@ export function describeChange(input, context) {
   return {
     tool,
     command: SHELL_TOOLS.has(tool) && isText(args.command) ? args.command : null,
-    paths: rawPaths.map(p => expandHome(p, context.home)),
+    paths: rawPaths.flatMap(p => pathForms(p, context, input?.cwd)),
     isWrite: WRITE_TOOLS.has(tool),
     addedText: String(addedText),
     removedText: String(removedText),

@@ -2,7 +2,7 @@
 // settings changes mid-session, so a write here could switch the guardrails off at once.
 // Session data the agent legitimately writes (memory, plans, todos) stays writable.
 
-import { expandHome, isUnder, normalisePath, segments } from '../lib/paths.mjs';
+import { expandHome, isUnder, normalisePath, pathForms, segments } from '../lib/paths.mjs';
 import { commandWriteTargets, invocationsOf } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
@@ -38,7 +38,7 @@ export function check(change, context) {
   }
 
   if (change.command) {
-    const target = commandWriteTargets(change.command).find(t => isProtectedClaudePath(expandHome(t, context.home), context));
+    const target = commandWriteTargets(change.command).find(t => pathForms(t, context, change.cwd).some(p => isProtectedClaudePath(p, context)));
     if (target) return blocked(`${target} is user-level Claude configuration`);
 
     const configCommand = invocationsOf(change.command, 'claude').find(args => CONFIG_SUBCOMMANDS.has(args[0]?.toLowerCase()));

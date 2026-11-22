@@ -30,6 +30,18 @@ export function createContext(env = process.env) {
   return {
     home: os.homedir(),
     env,
+    // Follows symlinks in the longest part of the path that exists; null if none of it does.
+    realpath: filePath => {
+      let existing = String(filePath);
+      let rest = '';
+      while (existing && !fs.existsSync(existing)) {
+        const cut = Math.max(existing.lastIndexOf('/'), existing.lastIndexOf('\\'));
+        if (cut <= 0) return null;
+        rest = existing.slice(cut) + rest;
+        existing = existing.slice(0, cut);
+      }
+      try { return fs.realpathSync.native(existing) + rest; } catch { return null; }
+    },
     readFile: filePath => {
       try {
         return fs.readFileSync(filePath, 'utf8');

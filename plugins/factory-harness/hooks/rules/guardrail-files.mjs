@@ -1,7 +1,7 @@
 // Guardrail files are human-owned: agents may read them but not change them.
 // User-level Claude configuration under ~/.claude is handled by the claude-config rule.
 
-import { expandHome, isUnder, normalisePath, segments } from '../lib/paths.mjs';
+import { isUnder, normalisePath, pathForms, segments } from '../lib/paths.mjs';
 import { commandWriteTargets, invocationsOf } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
@@ -99,7 +99,7 @@ export function check(change, context) {
   }
 
   if (change.command) {
-    const target = commandWriteTargets(change.command).find(t => guarded(expandHome(t, context.home)));
+    const target = commandWriteTargets(change.command).find(t => pathForms(t, context, change.cwd).some(guarded));
     if (target) return blockedPath(target);
     return checkDotnetCommands(change.command, nextStep);
   }
