@@ -31,6 +31,7 @@ export const CODE_SUPPRESSIONS = [
   { name: 'skipped test (Skip =)', pattern: /\bSkip\s*=/g },
   { name: 'explicit-only test (Explicit = true)', pattern: /\bExplicit\s*=\s*true\b/g },
   { name: 'Assert.Skip', pattern: /\bAssert\.Skip(When|Unless)?\s*\(/g },
+  { name: 'Assert.Ignore / Assert.Inconclusive', pattern: /\bAssert\.(Ignore|Inconclusive)\s*\(/g },
   { name: 'Skip.If / Skip.When', pattern: /\bSkip\.(If|IfNot|When|Unless)\s*\(/g },
   // In attribute position only (after [ or a comma, maybe qualified, or opening a line), or as the
   // full attribute name in an alias, so EF Core's builder.Ignore(...) isn't caught.
@@ -63,7 +64,9 @@ export const PROJECT_FILE_SUPPRESSIONS = [
 ];
 
 // Removing a restore widens a suppression to the end of the file, so a restore that disappears counts.
-const RESTORE = { name: 'removed #pragma warning restore', pattern: /#\s*pragma\s+warning\s+restore\b/gi };
+export const RESTORE = {
+  name: 'removed restore', pattern: /#\s*pragma\s+warning\s+restore\b|#\s*nullable\s+(restore|enable)\b/gi,
+};
 
 // The one suppression a generated file may hold: EF Core writes it into every migration designer
 // file and model snapshot. Only that exact line, only in those files.
@@ -137,8 +140,6 @@ export function findNewSuppressions(normalisedPath, addedText, removedText = '')
   if (rules === CODE_SUPPRESSIONS && unmatched(removed(RESTORE), added(RESTORE)).length > 0) found.push(RESTORE.name);
   return found;
 }
-
-export { RESTORE };
 
 export function check(change, context) {
   const nextStep = nextStepAfterBlock(context.env);

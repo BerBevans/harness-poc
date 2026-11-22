@@ -56,6 +56,8 @@ decisionTable({
     ['any other pragma in a migration file', write(`${REPO}\\src\\Data\\Migrations\\X.Designer.cs`, '#pragma warning disable 612, 618, CA1822')],
     ['widening an existing pragma', edit(code, '#pragma warning disable CA1822', '#pragma warning disable CA1822, CA2000, S3776')],
     ['swapping one pragma for another', edit(code, '#pragma warning disable CA1822', '#pragma warning disable S3776')],
+    ['NUnit Assert.Ignore', edit(testCode, 'Arrange();', 'Assert.Ignore("later");\nArrange();')],
+    ['Assert.Inconclusive', edit(testCode, 'Arrange();', 'Assert.Inconclusive();\nArrange();')],
     ['removing a restore', edit(code, '#pragma warning restore CA1822\n', '')],
     ['SuppressMessage through an alias', edit(code, 'a', 'using Quiet = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;')],
     ['qualified NUnit Ignore', edit(testCode, '[Test]', '[NUnit.Framework.Ignore("later")]\n[Test]')],

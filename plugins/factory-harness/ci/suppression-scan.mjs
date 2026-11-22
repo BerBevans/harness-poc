@@ -5,7 +5,8 @@
 // It compares across the whole PR: for each rule, the added lines it matches against the removed
 // lines it matches, as whole lines with whitespace normalised. Moving a method and its suppression
 // to another file is therefore allowed; widening a suppression, or swapping it for another, isn't.
-// A removed `#pragma warning restore` with no matching added one fails too.
+// A removed `#pragma warning restore` or `#nullable restore`/`enable` with no equal one added to the
+// same file fails too.
 
 import {
   CODE_SUPPRESSIONS, kindOf, lineMatcher, normaliseLine, RESTORE, suppressionRulesFor, unmatched,
@@ -27,7 +28,7 @@ const DESCRIPTIONS = {
   'coverage-exclusion': name => `Excludes code from coverage: ${name}.`,
   'suppression': name => `Adds a suppression: ${name}.`,
 };
-const describeRestore = () => 'Removes a #pragma warning restore, which widens a suppression to the end of the file.';
+const describeRestore = () => 'Removes a #pragma warning restore or #nullable restore, which widens a suppression to the end of the file.';
 const describe = name => DESCRIPTIONS[kindOf(name)](name);
 
 /**
@@ -102,7 +103,7 @@ export function evaluate({ author, files, changedFileCount, exemptUserIds }) {
     }
     if (rules === CODE_SUPPRESSIONS) {
       const counts = lineMatcher(RESTORE, path);
-      restores.added.push(...added.filter(a => counts(a.text)).map(a => a.text));
+      restores.added.push(...added.filter(a => counts(a.text)).map(a => `${file.filename}\0${a.text}`));
       restores.removed.push(...removed.filter(counts).map(text => ({ text, path: file.filename })));
     }
   }
@@ -112,7 +113,7 @@ export function evaluate({ author, files, changedFileCount, exemptUserIds }) {
   const lines = [
     ...[...tally].flatMap(([name, entry]) => unmatched(entry.added, entry.removed, text)
       .map(({ path, line }) => annotation(path, describe(name), line))),
-    ...unmatched(restores.removed, restores.added, text).map(({ path }) => annotation(path, describeRestore())),
+    ...unmatched(restores.removed, restores.added, r => `${r.path}\0${r.text}`).map(({ path }) => annotation(path, describeRestore())),
   ];
   if (lines.length === 0) return { passed: true, lines: ['No new suppressions.'] };
   return { passed: false, lines: [...lines, FIX] };

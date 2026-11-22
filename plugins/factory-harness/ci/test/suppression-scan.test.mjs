@@ -136,6 +136,12 @@ test('a removed restore fails, unless an equal one is added, as when moving it',
   assert.equal(scan(AGENT, [diff('src/A.cs', ['-#pragma warning restore CA1822', ' x', '+#pragma warning restore CA1822'])]).passed, true);
 });
 
+test('a restore moved to another file, or a removed nullable restore, fails', () => {
+  const moved = [diff('src/A.cs', ['-#pragma warning restore CA1822']), diff('src/B.cs', ['+#pragma warning restore CA1822'])];
+  assert.equal(scan(AGENT, moved).passed, false);
+  assert.equal(scan(AGENT, [diff('src/A.cs', ['-#nullable restore'])]).passed, false);
+});
+
 test('a Compile item in a project file and a pragma in Razor fail', () => {
   assert.equal(scan(AGENT, [diff('src/App/App.csproj', ['+<Compile Include="notes.txt" />'])]).passed, false);
   assert.equal(scan(AGENT, [diff('src/Web/Index.razor', ['+@{ #pragma warning disable CS8602 }'])]).passed, false);
