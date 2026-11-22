@@ -3,8 +3,8 @@
 // EXEMPT_USER_IDS, and Dependabot.
 //
 // It compares across the whole PR: for each rule, the added lines it matches against the removed
-// lines it matches, as whole lines with whitespace normalised. Moving a method and its suppression
-// to another file is therefore allowed; widening a suppression, or swapping it for another, isn't.
+// lines it matches, as whole lines with whitespace normalised. Moving a suppression to another file
+// is therefore allowed (though not its restore, see below); widening or swapping one isn't.
 // A removed `#pragma warning restore` or `#nullable restore`/`enable` with no equal one added to the
 // same file fails too.
 
