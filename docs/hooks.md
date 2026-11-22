@@ -209,6 +209,18 @@ Tested with Claude Code 2.1.303: the project install didn't load the plugin, `--
 
 The fence was run on GitHub on 2026-11-11 by the `fence-holds` job in `Run-agent check`: reads of decoys in the runner temp folder, outside the checkout and in `~/.gitconfig`, and of `/proc/self/environ`, were all refused, an allowed write and `Bash(git status *)` worked, and the guard hook still blocked a workflow file write.
 
+## Building and testing in a container
+
+Compiled code gets past the text fence: an MSBuild target, an analyser or a test the agent writes could read `CLAUDE_CODE_OAUTH_TOKEN` from the environment, or from another process's `/proc/<pid>/environ`. So agents build and test only through `ci/dotnet.mjs`, which runs `dotnet` in `docker run --rm`:
+
+- **Only `build` and `test`,** with an optional project path and, for `test`, `--filter`. Anything else is refused: `-p:` properties, `--settings` and `--logger` can change what runs or weaken a check.
+- **The image is the product `Dockerfile`'s `build` stage,** which must be `FROM <registry>/dotnet/sdk:<tag>@sha256:<digest> AS build` with a tag that starts with the `global.json` version. Dockerfiles are guardrail files, and Dependabot's `sdk-and-images` group bumps the image and `global.json` together. With `CI` set, both files are read from `FACTORY_BASE_SHA` with `git cat-file`, never from the worktree, and the wrapper refuses to run without it. Pin the multi-arch index digest, so the same pin runs on arm64 and x86_64.
+- **No host environment:** the container gets only `HOME`, the `DOTNET_` opt-outs and `NUGET_PACKAGES`. It has its own `/proc`, so no host process is visible.
+- **`.git` is mounted read-only,** so code can't plant a hook or config that host-side git runs later with a token. The rest of the repo is writable, so build output lands.
+- **It runs as the caller's user and group,** so files it writes aren't owned by root, with every capability dropped, `no-new-privileges` and a process limit. The network stays on for restore.
+
+`ci/test/dotnet.test.mjs` proves it on a small pinned image through the wrapper's own code path: a canary in the host environment is missing from the container's environment and from every `/proc/*/environ`, a value the wrapper passes is present, only the container's processes are visible, files belong to the caller and a write to `.git` fails. Without Docker the test is skipped locally and fails in CI.
+
 ## The spec agent
 
 The `spec-agent` action runs one round of spec refinement on an issue: the trigger check, the agent, then the posting, with the spec App's token created only after the agent has exited.
