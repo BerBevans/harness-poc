@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   agentEnvironment,
-  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment, RUNNER_FILE_COMMANDS, withoutRunnerFileCommands,
+  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, GIT_SETTINGS, gitEnvironment, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment, RUNNER_FILE_COMMANDS, withoutRunnerFileCommands,
 } from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
@@ -85,6 +86,7 @@ test('the deny list fences reads and edits away from secrets, the runner temp fo
     assert.ok(deny.includes(`Read(${place})`), `Read(${place})`);
     assert.ok(deny.includes(`Edit(${place})`), `Edit(${place})`);
   }
+  for (const place of ['./.git/**', './**/.git/**', './**/.git']) assert.ok(deny.includes(`Edit(${place})`), `Edit(${place})`);
 });
 
 test('Claude Code is installed at the pinned version, once', t => {
@@ -225,6 +227,35 @@ test('the agent always gets FACTORY_DOTNET=container, whatever the caller set, a
   assert.equal(env.FACTORY_DOTNET, 'container');
   assert.equal(env.GITHUB_ENV, undefined);
   assert.equal(env.PATH, '/bin');
+});
+
+test('the agent\'s git settings replace any the caller set', () => {
+  const env = agentEnvironment({ FACTORY_BASE_SHA: 'a'.repeat(40), GIT_CONFIG_PARAMETERS: "'core.fsmonitor'='x'", GIT_CONFIG_COUNT: '9', GIT_CONFIG_KEY_8: 'core.fsmonitor', GIT_CONFIG_GLOBAL: '/tmp/g' });
+  assert.deepEqual(Object.keys(env).filter(name => name.startsWith('GIT_CONFIG')).sort(), Object.keys(gitEnvironment()).sort());
+  assert.equal(env.GIT_CONFIG_COUNT, String(GIT_SETTINGS.length));
+  assert.equal(env.GIT_CONFIG_KEY_0, 'core.fsmonitor');
+  assert.equal(env.GIT_CONFIG_VALUE_0, 'false');
+});
+
+test('with the agent\'s git settings, a nested repo\'s fsmonitor never runs from status, diff or commit', t => {
+  const repo = tempDir(t);
+  const marker = path.join(repo, '..', `fsmonitor-ran-${path.basename(repo)}`);
+  t.after(() => fs.rmSync(marker, { force: true }));
+  const git = (args, env = process.env) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { env, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['commit', '-q', '--allow-empty', '-m', 'base']);
+  spawnSync('git', ['init', '-q', path.join(repo, 'x')]);
+  spawnSync('git', ['-C', path.join(repo, 'x'), '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'inner']);
+  spawnSync('git', ['-C', path.join(repo, 'x'), 'config', 'core.fsmonitor', `touch '${marker}'; false`]);
+  git(['add', '-A']);
+  fs.rmSync(marker, { force: true });
+  const agent = { ...process.env, ...gitEnvironment() };
+  for (const args of [['status', '--porcelain'], ['diff', 'HEAD', '--binary'], ['commit', '-q', '-am', 'y', '--allow-empty']]) {
+    git(args, agent);
+    assert.equal(fs.existsSync(marker), false, args.join(' '));
+  }
+  git(['status', '--porcelain']);
+  assert.ok(fs.existsSync(marker), 'without the settings it runs, so the test can tell');
 });
 
 test('the agent doesn\'t start without a full base commit SHA', () => {

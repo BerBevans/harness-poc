@@ -123,6 +123,29 @@ const TIMEOUT_MS = 30 * 60 * 1000;
  * process skips the clean-up: the workflow must check that no `factory-dotnet-` container is running
  * before it creates a token.)
  */
+/**
+ * Removes every `.git` under the repo but its own (folders, gitfiles and links alike) and returns
+ * their paths. Code in the container can make one, and host git runs the commands its config names
+ * when it looks inside. Links are removed, never followed.
+ */
+export function removeNestedRepos(repo) {
+  const found = [];
+  const visit = (directory, top) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.name.toLowerCase() === '.git') {
+        if (top && entry.name === '.git') continue;
+        found.push(path.relative(repo, full));
+        fs.rmSync(full, { recursive: true, force: true });
+      } else if (entry.isDirectory()) {
+        visit(full, false);
+      }
+    }
+  };
+  visit(repo, true);
+  return found.sort();
+}
+
 export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS, capture = false, env }) {
   if (!fs.statSync(path.join(repo, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
     throw new Error(`${repo} has no .git folder to mount read-only.`);
@@ -136,9 +159,13 @@ export function runInContainer({ image, repo, entrypoint, args, run = spawnSync,
     run('docker', ['rm', '--force', name], { stdio: 'ignore', timeout: 30000 });
   }
   const output = capture ? `${result.stdout ?? ''}${result.stderr ?? ''}` : '';
-  if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output };
-  if (result.error) throw new Error(`Docker couldn't start: ${result.error.message}`);
-  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
+  if (result.error && result.error.code !== 'ETIMEDOUT') throw new Error(`Docker couldn't start: ${result.error.message}`);
+  const outcome = result.error
+    ? { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output }
+    : { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
+  const nested = removeNestedRepos(repo);
+  if (nested.length === 0) return outcome;
+  return { passed: false, lines: [...outcome.lines, `The run created git repositories inside the repo (${nested.join(', ')}), which host git could run code from. They were removed; don't create them.`], output };
 }
 
 /** Removes any `factory-dotnet-` container an earlier, killed run left behind. */

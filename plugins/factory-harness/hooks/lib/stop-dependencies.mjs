@@ -39,9 +39,10 @@ done`;
 /**
  * Splits the checks container's output at its status lines into the build's result and each test
  * project's. The first step with no status line (the container timed out or died) failed, and the
- * steps after it never ran, so they aren't reported.
+ * steps after it never ran, so they aren't reported. A run that failed after every step passed
+ * (the wrapper removed a git repo it created, say) fails the build, with the whole output.
  */
-export function splitChecks(output, projects) {
+export function splitChecks(output, projects, ok = true) {
   const parts = output.split(/^@@factory (\d+)\r?$/m);
   const steps = [];
   for (let i = 0; i + 1 < parts.length; i += 2) steps.push({ ok: parts[i + 1] === '0', output: parts[i] });
@@ -49,7 +50,9 @@ export function splitChecks(output, projects) {
   const build = steps[0] ?? unfinished;
   if (!build.ok) return { build, tests: [] };
   const tests = steps.slice(1, projects.length + 1);
-  return { build, tests: tests.length < projects.length ? [...tests, unfinished] : tests };
+  if (tests.length < projects.length) return { build, tests: [...tests, unfinished] };
+  if (!ok && tests.every(test => test.ok)) return { build: { ok: false, output }, tests: [] };
+  return { build, tests };
 }
 
 export function findTestProjects(root) {
@@ -123,7 +126,7 @@ export function createStopDependencies(env) {
       if (inContainer(env)) {
         removeLeftoverContainers({ env: dockerEnvironment(env) });
         const result = dotnet(root, ['-c', CHECKS_SCRIPT, 'checks', solution, ...projects], BUILD_SECONDS + TEST_SECONDS * projects.length, { entrypoint: 'sh' });
-        return splitChecks(result.output, projects);
+        return splitChecks(result.output, projects, result.ok);
       }
       const build = dotnet(root, buildArguments(solution), BUILD_SECONDS);
       return { build, tests: build.ok ? projects.map(project => dotnet(root, testArguments(project), TEST_SECONDS)) : [] };

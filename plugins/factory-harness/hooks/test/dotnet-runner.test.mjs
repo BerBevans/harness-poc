@@ -45,6 +45,9 @@ test('the checks container\'s output splits at its status lines; a step without 
   assert.equal(timedOut.tests[0].ok, false);
   assert.match(timedOut.tests[0].output, /A hung\nThis step didn't finish\./);
   assert.equal(splitChecks('dotnet ran for over 540 seconds', projects).build.ok, false);
+  const removedRepo = 'built\n@@factory 0\nA\n@@factory 0\nB\n@@factory 0\nThe run created git repositories inside the repo (x/.git)';
+  assert.deepEqual(splitChecks(removedRepo, projects, false), { build: { ok: false, output: removedRepo }, tests: [] }, 'a failure after the last step still fails');
+  assert.equal(splitChecks(removedRepo, projects, true).build.ok, true);
 });
 
 test('the checks script runs the build, then each test project, with their own output', { skip: process.platform === 'win32' && 'needs a POSIX shell' }, t => {

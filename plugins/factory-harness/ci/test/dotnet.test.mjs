@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { dockerArguments, dotnetArguments, parseRequest, readAtCommit, removeLeftoverContainers, resolveImage, runInContainer, sdkImage } from '../dotnet.mjs';
+import { dockerArguments, dotnetArguments, parseRequest, readAtCommit, removeLeftoverContainers, removeNestedRepos, resolveImage, runInContainer, sdkImage } from '../dotnet.mjs';
 
 const SHA = 'c'.repeat(40);
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -143,6 +143,39 @@ test('with capture, the output is collected and Docker gets only the environment
   assert.deepEqual(calls[0].options, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 5000, killSignal: 'SIGKILL', env: { PATH: '/bin' } });
   assert.equal(calls[1].args[0], 'rm');
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('every .git in the repo but its own is removed, and links are never followed', t => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const repo = path.join(work, 'repo');
+  const outside = path.join(work, 'outside');
+  for (const folder of ['.git/hooks', 'src/x/.git/hooks', 'b/c', 'bin/Debug', outside + '/.git']) fs.mkdirSync(path.isAbsolute(folder) ? folder : path.join(repo, folder), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'src/x/.git/config'), '[core]\n\tfsmonitor = ./evil.sh\n');
+  fs.writeFileSync(path.join(repo, 'b/c/.git'), 'gitdir: ../../bin/Debug\n');
+  fs.writeFileSync(path.join(repo, 'bin/Debug/.GIT'), '');
+  fs.symlinkSync(outside, path.join(repo, 'linked'));
+  fs.symlinkSync(path.join(outside, '.git'), path.join(repo, 'b/.git'));
+  assert.deepEqual(removeNestedRepos(repo), ['b/.git', 'b/c/.git', 'bin/Debug/.GIT', 'src/x/.git']);
+  assert.ok(fs.existsSync(path.join(repo, '.git/hooks')), 'the repo\'s own .git stays');
+  assert.ok(fs.existsSync(path.join(outside, '.git')), 'a link is removed, never followed');
+  assert.ok(fs.existsSync(path.join(repo, 'src/x')));
+  assert.deepEqual(removeNestedRepos(repo), []);
+});
+
+test('a run that creates a git repo in the repo fails, keeping its output, and the repo is removed', t => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-run-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(repo, '.git'));
+  const run = (program, args) => {
+    if (args[0] === 'run') fs.mkdirSync(path.join(repo, 'x/.git'), { recursive: true });
+    return { status: 0, stdout: 'Build succeeded.\n', stderr: '' };
+  };
+  const result = runInContainer({ image: 'img', repo, args: ['build'], run, capture: true });
+  assert.equal(result.passed, false);
+  assert.equal(result.output, 'Build succeeded.\n');
+  assert.match(result.lines.at(-1), /created git repositories inside the repo \(x\/\.git\)/);
+  assert.equal(fs.existsSync(path.join(repo, 'x/.git')), false);
 });
 
 test('leftover factory containers are removed, and nothing is run when there are none', () => {
