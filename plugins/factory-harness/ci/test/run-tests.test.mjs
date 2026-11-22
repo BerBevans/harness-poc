@@ -9,7 +9,8 @@ const record = (name, isTestProject = true) =>
 test('each test project runs on its own, into a folder named after it', () => {
   assert.deepEqual(testArguments(record('App.UnitTests'), '/results', 'Release'), [
     'test', path.resolve('/r/tests/App.UnitTests/App.UnitTests.csproj'), '-c', 'Release', '--no-build',
-    '--logger', 'trx', '--results-directory', path.join('/results', 'App.UnitTests'),
+    '--logger', 'trx', '-p:VSTestTestCaseFilter=', '-p:VSTestCLIRunSettings=', '-p:TestingPlatformCommandLineArguments=',
+    '--results-directory', path.join('/results', 'App.UnitTests'),
     '--collect', 'Code Coverage;Format=cobertura',
   ]);
 });

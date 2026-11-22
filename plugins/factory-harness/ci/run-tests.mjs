@@ -23,9 +23,14 @@ export function testProjects(records) {
   return projects;
 }
 
-/** The arguments that test one project into its own folder under `results`. */
+/**
+ * The arguments that test one project into its own folder under `results`. The empty properties
+ * beat a project's own, so a filter set only for `dotnet test` (on VSTestNoBuild, say) can't leave
+ * tests out; the build-settings target fails any set at build time.
+ */
 export const testArguments = (record, results, configuration) => [
   'test', record.path, '-c', configuration, '--no-build', '--logger', 'trx',
+  '-p:VSTestTestCaseFilter=', '-p:VSTestCLIRunSettings=', '-p:TestingPlatformCommandLineArguments=',
   '--results-directory', path.join(results, projectName(record)), '--collect', 'Code Coverage;Format=cobertura',
 ];
 

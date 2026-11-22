@@ -70,6 +70,33 @@
       Condition="'$(RunAnalyzers)' == 'false' or '$(RunAnalyzersDuringBuild)' == 'false'"
       Text="Analysers are switched off (RunAnalyzers or RunAnalyzersDuringBuild is false). $(_FactoryFix)" />
     <!--
+      The SDK's defaults follow the target framework: on net10.0, WarningLevel 10 and analysis level
+      10.0. A lower WarningLevel silences warning waves, a lower AnalysisLevel (none counts as 4.0)
+      drops newer rules, and an AnalysisLevel suffix (latest-minimum) chooses the rule set in place
+      of AnalysisMode.
+    -->
+    <PropertyGroup>
+      <_FactoryFrameworkVersion>$(TargetFrameworkVersion.TrimStart('v'))</_FactoryFrameworkVersion>
+    </PropertyGroup>
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(WarningLevel)' == '' or $([MSBuild]::VersionLessThan('$(WarningLevel)', '$(_FactoryFrameworkVersion)'))"
+      Text="WarningLevel is '$(WarningLevel)'; it must be at least the SDK's default for $(TargetFramework), $(_FactoryFrameworkVersion). $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(EffectiveAnalysisLevel)' == '' or $([MSBuild]::VersionLessThan('$(EffectiveAnalysisLevel)', '$(_FactoryFrameworkVersion)'))"
+      Text="AnalysisLevel is '$(AnalysisLevel)'; it must be at least $(_FactoryFrameworkVersion), as the SDK's default latest is. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(AnalysisLevelSuffix)' != '' and '$(AnalysisLevelSuffix)' != 'all'"
+      Text="AnalysisLevel is '$(AnalysisLevel)'; its suffix chooses the rule set in place of AnalysisMode All. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(EnableNETAnalyzers)' == 'false'"
+      Text="EnableNETAnalyzers is false, which removes the CA analysers. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(CodeAnalysisTreatWarningsAsErrors)' == 'false'"
+      Text="CodeAnalysisTreatWarningsAsErrors is false, so analyser warnings don't fail the build. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(CodeAnalysisRuleSet)' != ''"
+      Text="CodeAnalysisRuleSet is '$(CodeAnalysisRuleSet)'; rule severities may come only from .editorconfig and .globalconfig files. $(_FactoryFix)" />
+    <!--
       Size and complexity limits come from the Sonar analyser, with thresholds in the repo's
       SonarLint.xml, whose full path CI passes as FactorySonarLintFile. A project could otherwise
       remove the analyser or swap in a looser SonarLint.xml.
@@ -118,12 +145,18 @@
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'@(_FactoryForeignAnalyzerConfig)' != ''"
       Text="Rule severities may come only from .editorconfig and .globalconfig files; this project adds @(_FactoryForeignAnalyzerConfig, ', '). $(_FactoryFix)" />
-    <!-- Run settings can exclude code from coverage, so a project may not choose its own. -->
+    <!--
+      Run settings can exclude code from coverage, and a test filter or runner arguments can leave
+      tests out unseen, so a project may not choose its own. CI also passes each as empty.
+    -->
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(RunSettingsFilePath)' != ''"
       Text="RunSettingsFilePath is '$(RunSettingsFilePath)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
     <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
       Condition="'$(VSTestSetting)' != ''"
       Text="VSTestSetting is '$(VSTestSetting)'; it must be empty, because run settings can exclude code from coverage. $(_FactoryFix)" />
+    <Error Code="FH0001" ContinueOnError="ErrorAndContinue"
+      Condition="'$(VSTestTestCaseFilter)$(VSTestCLIRunSettings)$(TestingPlatformCommandLineArguments)' != ''"
+      Text="VSTestTestCaseFilter, VSTestCLIRunSettings and TestingPlatformCommandLineArguments must be empty, because they can leave tests out of the run. $(_FactoryFix)" />
   </Target>
 </Project>
