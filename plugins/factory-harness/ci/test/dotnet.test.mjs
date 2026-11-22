@@ -6,6 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { dockerArguments, dotnetArguments, parseRequest, readAtCommit, resolveImage, runInContainer, sdkImage } from '../dotnet.mjs';
 
+const SHA = 'c'.repeat(40);
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 const dockerfile = tag => `# syntax=docker/dockerfile:1\nFROM mcr.microsoft.com/dotnet/sdk:${tag}@${DIGEST} AS build\nWORKDIR /src\nFROM mcr.microsoft.com/dotnet/aspnet:10.0@${DIGEST}\n`;
 const globalJson = version => JSON.stringify({ sdk: { version, rollForward: 'disable' } });
@@ -20,7 +21,7 @@ test('build and test take only a project and, for test, a filter', () => {
 test('anything that could change what runs is refused', () => {
   for (const argv of [[], ['restore'], ['run'], ['build', '-p:RunAnalyzers=false'], ['test', '--settings', 'x.runsettings'],
     ['test', '--logger', 'trx'], ['build', '--filter', 'x'], ['test', '--filter'], ['test', '--filter', '--no-build'],
-    ['build', 'a.csproj', 'b.csproj'], ['build', '/etc/x.csproj'], ['build', '../other/x.csproj'], ['build', 'src\\..\\..\\x.csproj']]) {
+    ['build', 'a.csproj', 'b.csproj'], ['build', '/etc/x.csproj'], ['build', '../other/x.csproj'], ['build', 'src\\..\\..\\x.csproj'], ['build', '@opts.rsp'], ['test', '@opts.rsp']]) {
     assert.throws(() => parseRequest(argv), /Usage|isn't allowed/, argv.join(' '));
   }
 });
@@ -37,31 +38,50 @@ test('the image is the build stage pinned by digest to the global.json SDK', () 
 test('in CI the image comes from the base commit, never the worktree', () => {
   const reads = [];
   const read = (repo, sha, file) => { reads.push(`${sha}:${file}`); return file === 'Dockerfile' ? dockerfile('10.0.404') : globalJson('10.0.404'); };
-  assert.match(resolveImage({ CI: 'true', FACTORY_BASE_SHA: 'abc123' }, '/repo', read), /sdk:10\.0\.404@/);
-  assert.deepEqual(reads, ['abc123:Dockerfile', 'abc123:global.json']);
+  assert.match(resolveImage({ CI: 'true', FACTORY_BASE_SHA: SHA }, '/repo', read), /sdk:10\.0\.404@/);
+  assert.deepEqual(reads, [`${SHA}:Dockerfile`, `${SHA}:global.json`]);
   assert.throws(() => resolveImage({ CI: 'true' }, '/repo', read), /FACTORY_BASE_SHA is empty/);
 });
 
 test('a committed file is read with plumbing and no global or system git config', () => {
   let call;
   const run = (program, args, options) => { call = { program, args, env: options.env }; return { status: 0, stdout: 'x', stderr: '' }; };
-  assert.equal(readAtCommit('/repo', 'abc', 'Dockerfile', run), 'x');
-  assert.deepEqual(call.args, ['-C', '/repo', 'cat-file', 'blob', 'abc:Dockerfile']);
+  assert.equal(readAtCommit('/repo', SHA, 'Dockerfile', run), 'x');
+  assert.deepEqual(call.args, ['-C', '/repo', 'cat-file', 'blob', `${SHA}:Dockerfile`]);
+  assert.equal(call.env.GIT_NO_REPLACE_OBJECTS, '1');
+  for (const sha of ['HEAD', 'main', '-p', 'abc123']) assert.throws(() => readAtCommit('/repo', sha, 'Dockerfile', run), /full commit SHA/, sha);
   assert.equal(call.env.GIT_CONFIG_NOSYSTEM, '1');
   assert.equal(call.env.GIT_CONFIG_GLOBAL, '/dev/null');
 });
 
 test('the container gets no host environment, a read-only .git and the caller\'s user', () => {
-  const args = dockerArguments({ image: 'img', repo: '/repo', uid: 1001, gid: 118, args: ['build'] });
+  const args = dockerArguments({ image: 'img', repo: '/repo', uid: 1001, gid: 118, name: 'factory-dotnet-1', args: ['build'] });
   const joined = args.join(' ');
   assert.match(joined, /--user 1001:118 /);
-  assert.match(joined, /-v \/repo:\/src -v \/repo\/\.git:\/src\/\.git:ro /);
+  assert.match(joined, /^run --rm --name factory-dotnet-1 /);
+  assert.match(joined, /--mount type=bind,src=\/repo,dst=\/src --mount type=bind,src=\/repo\/\.git,dst=\/src\/\.git,readonly /);
   assert.match(joined, /--cap-drop ALL --security-opt no-new-privileges /);
   assert.match(joined, / --read-only --tmpfs \/tmp:exec,size=4g /);
   assert.deepEqual(args.slice(-4), ['--entrypoint', 'dotnet', 'img', 'build']);
   assert.ok(!args.some(arg => /^--(env-file|pid|privileged|network|ipc|uts)(=|$)|docker\.sock/.test(arg)));
   const passed = args.flatMap((arg, i) => (arg === '-e' ? [args[i + 1].split('=')[0]] : []));
   assert.deepEqual(passed, ['HOME', 'DOTNET_CLI_HOME', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_NOLOGO', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE', 'NUGET_PACKAGES']);
+});
+
+test('a run that times out is stopped, reported as a failure, and its container removed', t => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-wrapper-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(repo, '.git'));
+  const calls = [];
+  const run = (program, args, options) => {
+    calls.push(args);
+    return args[0] === 'run' ? { status: null, signal: 'SIGTERM', error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) } : { status: 0 };
+  };
+  const result = runInContainer({ image: 'img', repo, args: ['test'], run, timeout: 60000 });
+  assert.deepEqual(result, { passed: false, lines: ['dotnet ran for over 1 minutes, so it was stopped.'] });
+  const name = calls[0][calls[0].indexOf('--name') + 1];
+  assert.match(name, /^factory-dotnet-/);
+  assert.deepEqual(calls[1], ['rm', '--force', name]);
 });
 
 // In CI a missing Docker must fail the isolation test, never skip it, or the proof silently goes away.

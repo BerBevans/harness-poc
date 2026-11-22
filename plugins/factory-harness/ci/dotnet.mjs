@@ -37,8 +37,11 @@ export function parseRequest(argv) {
   return request;
 }
 
+// `@file` is a response file that dotnet expands into options, so it isn't a project.
 const isProjectPath = arg =>
-  !arg.startsWith('-') && !path.isAbsolute(arg) && !arg.split(/[\\/]/).includes('..');
+  !/^[-@]/.test(arg) && !path.isAbsolute(arg) && !arg.split(/[\\/]/).includes('..');
+
+const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
 const IMAGE = /^\s*FROM\s+(\S+\/dotnet\/sdk:(\S+?)@sha256:[0-9a-f]{64})\s+AS\s+build\s*$/im;
 
@@ -54,11 +57,15 @@ export function sdkImage(dockerfile, globalJson) {
   return image;
 }
 
-/** Reads a file as committed at `sha`, ignoring the worktree and any config that could run a command. */
+/**
+ * Reads a file as committed at `sha` with plumbing, so no filter, textconv or hook runs. System and
+ * global config are ignored, and so are replace refs, which could swap in a different file.
+ */
 export function readAtCommit(repo, sha, file, run = spawnSync) {
+  if (!COMMIT_SHA.test(sha)) throw new Error(`FACTORY_BASE_SHA must be a full commit SHA, not "${sha}".`);
   const result = run('git', ['-C', repo, 'cat-file', 'blob', `${sha}:${file}`], {
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+    env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_NO_REPLACE_OBJECTS: '1' },
   });
   if (result.status !== 0) throw new Error(`Couldn't read ${file} at ${sha}: ${result.stderr.trim()}`);
   return result.stdout;
@@ -73,9 +80,9 @@ export function dotnetArguments({ command, project, filter }) {
  * `docker run` arguments. Nothing from the host environment is passed: only the values set here.
  * The network stays on for NuGet restore.
  */
-export function dockerArguments({ image, repo, uid, gid, entrypoint = 'dotnet', args }) {
+export function dockerArguments({ image, repo, uid, gid, name, entrypoint = 'dotnet', args }) {
   return [
-    'run', '--rm',
+    'run', '--rm', '--name', name,
     '--user', `${uid}:${gid}`,
     '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges',
@@ -87,8 +94,9 @@ export function dockerArguments({ image, repo, uid, gid, entrypoint = 'dotnet', 
     '-e', 'DOTNET_NOLOGO=1',
     '-e', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1',
     '-e', `NUGET_PACKAGES=${HOME}/.nuget/packages`,
-    '-v', `${repo}:/src`,
-    '-v', `${path.join(repo, '.git')}:/src/.git:ro`,
+    // --mount, unlike -v, fails on a missing source and can't be misread through a ':' in a path.
+    '--mount', `type=bind,src=${repo},dst=/src`,
+    '--mount', `type=bind,src=${path.join(repo, '.git')},dst=/src/.git,readonly`,
     '-w', '/src',
     '--entrypoint', entrypoint,
     image,
@@ -103,14 +111,28 @@ export function resolveImage(env, repo, read = readAtCommit) {
   return sdkImage(load('Dockerfile'), load('global.json'));
 }
 
-/** Runs the container with the terminal attached. Resolves to { passed, lines }. */
-export function runInContainer({ image, repo, entrypoint, args, run = spawnSync }) {
+const TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Runs the container with the terminal attached. Resolves to { passed, lines }. The container is
+ * named and always removed, even after a timeout, so it can't keep writing to the worktree while
+ * later steps read it. (A SIGKILL of this process skips the clean-up: the workflow must check that
+ * no `factory-dotnet-` container is running before it creates a token.)
+ */
+export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS }) {
   if (!fs.statSync(path.join(repo, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
     throw new Error(`${repo} has no .git folder to mount read-only.`);
   }
-  const result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), entrypoint, args }), { stdio: 'inherit' });
+  const name = `factory-dotnet-${process.pid}-${Date.now()}`;
+  let result;
+  try {
+    result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { stdio: 'inherit', timeout });
+  } finally {
+    run('docker', ['rm', '--force', name], { stdio: 'ignore' });
+  }
+  if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${timeout / 60000} minutes, so it was stopped.`] };
   if (result.error) throw new Error(`Docker couldn't start: ${result.error.message}`);
-  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status}.`] };
+  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`] };
 }
 
 await runIfMain(import.meta.url, env => {
