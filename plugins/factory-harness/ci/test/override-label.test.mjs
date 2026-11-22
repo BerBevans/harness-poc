@@ -41,6 +41,13 @@ test('a label someone else applied still fails, and says so', () => {
   assert.match(result.lines.at(-1), /factory-agent\[bot\] applied coverage-override, but only the repo owner's override counts/);
 });
 
+test('on a push, even the owner\'s label doesn\'t count, since it approved the diff before the push', () => {
+  const result = overridden(failing, { label: LABEL, appliedBy: OWNER, allowedUserIds: [1001], eventAction: 'synchronize' });
+  assert.equal(result.passed, false);
+  assert.match(result.lines.at(-1), /coverage-override was applied before this push, so it doesn't count/);
+  assert.equal(overridden(failing, { label: LABEL, appliedBy: OWNER, allowedUserIds: [1001], eventAction: 'labeled' }).passed, true);
+});
+
 test('no label, or a passing check, is left as it is', () => {
   assert.equal(overridden(failing, { label: LABEL, appliedBy: null, allowedUserIds: [1001] }), failing);
   const passing = { passed: true, lines: ['Coverage held.'] };

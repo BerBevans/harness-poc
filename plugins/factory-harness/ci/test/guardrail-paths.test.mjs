@@ -86,7 +86,27 @@ const actionsEnv = overrides => ({
   ...overrides,
 });
 
-const prEvent = (author, changedFiles) => () => ({ pull_request: { number: 7, user: author, changed_files: changedFiles } });
+const prEvent = (author, changedFiles, sender = author, action = 'opened') =>
+  () => ({ action, sender, pull_request: { number: 7, user: author, changed_files: changedFiles } });
+
+test('a push by an agent to the owner\'s or Dependabot\'s PR is held to the rules', async () => {
+  for (const opener of [OWNER, DEPENDABOT]) {
+    const result = await run({ env: actionsEnv(), readEvent: prEvent(opener, 1, AGENT, 'synchronize'), fetchImpl: fakeApi(changed('.editorconfig')).fetchImpl });
+    assert.equal(result.passed, false, opener.login);
+  }
+});
+
+test('the owner\'s own push, or the owner labelling an agent\'s PR, changes nothing', async () => {
+  const owners = await run({ env: actionsEnv(), readEvent: prEvent(OWNER, 1, OWNER, 'synchronize'), fetchImpl: fakeApi(changed('.editorconfig')).fetchImpl });
+  assert.equal(owners.passed, true);
+  const agents = await run({ env: actionsEnv(), readEvent: prEvent(AGENT, 1, OWNER, 'labeled'), fetchImpl: fakeApi(changed('.editorconfig')).fetchImpl });
+  assert.equal(agents.passed, false);
+});
+
+test('an event with no sender doesn\'t keep the owner\'s exemption', async () => {
+  const result = await run({ env: actionsEnv(), readEvent: prEvent(OWNER, 1, null), fetchImpl: fakeApi(changed('.editorconfig')).fetchImpl });
+  assert.equal(result.passed, false);
+});
 
 test('run checks the PR from the event against the API file list', async () => {
   const api = fakeApi(changed('.editorconfig'));

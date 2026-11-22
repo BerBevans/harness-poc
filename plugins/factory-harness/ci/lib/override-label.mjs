@@ -41,8 +41,13 @@ export function labelAppliedBy(events, label) {
  * Applies an override label to a check's failing result. An approved label turns it into a pass,
  * with its errors shown as warnings; a label anyone else applied is reported as an error.
  */
-export function overridden(result, { label, appliedBy, allowedUserIds }) {
+export function overridden(result, { label, appliedBy, allowedUserIds, eventAction }) {
   if (result.passed || !appliedBy) return result;
+  // A label approves the diff it was applied to. A push changes the diff, and the reset-overrides
+  // action removes the label, so the owner reviews the new diff and applies it again.
+  if (eventAction === 'synchronize') {
+    return { passed: false, lines: [...result.lines, `::error::${label} was applied before this push, so it doesn't count. Review the new diff and apply ${label} again.`] };
+  }
   if (allowedUserIds.includes(appliedBy.id)) {
     return {
       passed: true,
