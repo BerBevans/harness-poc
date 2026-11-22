@@ -169,7 +169,6 @@ export function removeNestedRepos(repo) {
  * process skips the clean-up: the workflow must check that no `factory-dotnet-` container is running
  * before it creates a token.)
  */
-
 export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS, capture = false, env }) {
   if (!fs.statSync(path.join(repo, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
     throw new Error(`${repo} has no .git folder to mount read-only.`);

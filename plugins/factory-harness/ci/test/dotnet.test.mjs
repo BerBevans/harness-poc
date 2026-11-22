@@ -187,6 +187,18 @@ test('a run that creates a git repo in the repo fails, keeping its output, and t
   assert.equal(fs.existsSync(path.join(repo, 'x/.git')), false);
 });
 
+test('a .git that can\'t be removed is reported, and the run fails', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'needs POSIX permissions and a non-root user' }, t => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-stuck-'));
+  t.after(() => { fs.chmodSync(path.join(repo, 'ro'), 0o700); fs.rmSync(repo, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(repo, '.git'));
+  fs.mkdirSync(path.join(repo, 'ro/.git'), { recursive: true });
+  fs.chmodSync(path.join(repo, 'ro'), 0o500);
+  assert.deepEqual(removeNestedRepos(repo), { removed: [], unchecked: ['ro/.git'] });
+  const result = runInContainer({ image: 'img', repo, args: ['build'], run: () => ({ status: 0, stdout: '', stderr: '' }), capture: true });
+  assert.equal(result.passed, false);
+  assert.match(result.lines.at(-1), /Couldn't check or remove ro\/\.git for git repositories/);
+});
+
 test('a run that ends in an error, such as output past the capture limit, still removes nested repos', t => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-error-'));
   t.after(() => fs.rmSync(repo, { recursive: true, force: true }));

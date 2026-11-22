@@ -39,7 +39,8 @@ done`;
 /**
  * Splits the checks container's output at its status lines into the build's result and each test
  * project's. The first step with no status line (the container timed out or died) failed, and the
- * steps after it never ran, so they aren't reported. `notes` is any text after the last status line. A run that failed after every step passed
+ * steps after it never ran, so they aren't reported. `notes` is any text after the last status
+ * line. A run that failed after every step passed
  * (the wrapper removed a git repo it created, say) fails the build, with the whole output.
  */
 export function splitChecks(output, projects, ok = true) {
