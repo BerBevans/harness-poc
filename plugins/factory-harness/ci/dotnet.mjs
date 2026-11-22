@@ -2,7 +2,8 @@
 // analysers, tests) never runs on the host. On the host it could read CLAUDE_CODE_OAUTH_TOKEN from
 // the environment or from another process's /proc/<pid>/environ; in the container there is no
 // host environment, no host /proc, and `.git` is read-only, so it can't plant a git hook or config
-// that host-side git would run later with a token.
+// in the repo's own git folder. It could make a nested repo that host git would run code from, so
+// every run ends by removing them.
 //
 // The image is the product Dockerfile's `build` stage, pinned by digest, which is a guardrail file
 // that Dependabot bumps together with global.json. In CI it is read from the base commit, so an
@@ -114,6 +115,51 @@ export function resolveImage(env, repo, read = readAtCommit) {
 const TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
+ * Removes every `.git` under the repo but its own (folders, gitfiles and links alike). Code in the
+ * container can make one, and host git runs the commands its config names when it looks inside.
+ * Links are removed, never followed. A folder the code made unreadable is made readable (the caller
+ * owns it) and searched; one that still can't be searched or removed is reported, never skipped.
+ * Returns { removed, unchecked }, both repo-relative paths.
+ */
+export function removeNestedRepos(repo) {
+  const removed = [];
+  const unchecked = [];
+  const relative = full => path.relative(repo, full);
+  const list = directory => {
+    try {
+      return fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      try {
+        fs.chmodSync(directory, 0o700);
+        return fs.readdirSync(directory, { withFileTypes: true });
+      } catch {
+        unchecked.push(relative(directory));
+        return [];
+      }
+    }
+  };
+  const visit = (directory, top) => {
+    for (const entry of list(directory)) {
+      const full = path.join(directory, entry.name);
+      if (entry.name.toLowerCase() === '.git') {
+        if (top && entry.name === '.git') continue;
+        try {
+          if (entry.isDirectory()) fs.chmodSync(full, 0o700);
+          fs.rmSync(full, { recursive: true, force: true });
+          removed.push(relative(full));
+        } catch {
+          unchecked.push(relative(full));
+        }
+      } else if (entry.isDirectory()) {
+        visit(full, false);
+      }
+    }
+  };
+  visit(repo, true);
+  return { removed: removed.sort(), unchecked: unchecked.sort() };
+}
+
+/**
  * Runs the container, with the terminal attached or, with `capture`, its output collected into
  * `output`. Returns { passed, lines, output }. `env` is Docker's own environment; nothing from it
  * reaches the container. The container is
@@ -129,16 +175,24 @@ export function runInContainer({ image, repo, entrypoint, args, run = spawnSync,
   }
   const name = `factory-dotnet-${process.pid}-${Date.now()}`;
   let result;
+  let nested;
   try {
     const io = capture ? { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 } : { stdio: 'inherit' };
     result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { ...io, timeout, killSignal: 'SIGKILL', ...(env ? { env } : {}) });
   } finally {
     run('docker', ['rm', '--force', name], { stdio: 'ignore', timeout: 30000 });
+    // Before anything can throw: code that floods the output or kills Docker mustn't skip it.
+    nested = removeNestedRepos(repo);
   }
   const output = capture ? `${result.stdout ?? ''}${result.stderr ?? ''}` : '';
-  if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output };
-  if (result.error) throw new Error(`Docker couldn't start: ${result.error.message}`);
-  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
+  if (result.error && result.error.code !== 'ETIMEDOUT') throw new Error(`Docker couldn't start: ${result.error.message}`);
+  const outcome = result.error
+    ? { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output }
+    : { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
+  const lines = [...outcome.lines];
+  if (nested.removed.length > 0) lines.push(`The run created git repositories inside the repo (${nested.removed.join(', ')}), which host git could run code from. They were removed; don't create them.`);
+  if (nested.unchecked.length > 0) lines.push(`Couldn't check or remove ${nested.unchecked.join(', ')} for git repositories. Make them readable and removable.`);
+  return lines.length === outcome.lines.length ? outcome : { passed: false, lines, output };
 }
 
 /** Removes any `factory-dotnet-` container an earlier, killed run left behind. */

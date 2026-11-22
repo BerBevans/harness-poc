@@ -140,6 +140,13 @@ test('a test project ran tests only when dotnet test counted at least one', () =
   assert.ok(!testsRan(''));
 });
 
+test('the wrapper\'s own notes reach the block message, which the summaries would drop', () => {
+  const runBuildAndTests = () => ({ build: { ok: false, output: 'src/A.cs(3,1): error CS1002: ; expected' }, tests: [], notes: 'Removed x/.git; don\'t create them.' });
+  const output = decideStop({}, fakeDependencies({ runBuildAndTests }).deps);
+  assert.match(output.reason, /error CS1002/);
+  assert.match(output.reason, /Removed x\/\.git/);
+});
+
 test('blocks when the solution to check is ambiguous', () => {
   const output = decideStop({}, fakeDependencies({ findSolution: () => { throw new Error('more than one solution'); } }).deps);
   assert.equal(output.decision, 'block');

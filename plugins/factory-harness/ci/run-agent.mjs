@@ -41,16 +41,35 @@ export const RUNNER_FILE_COMMANDS = ['GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_OUTPUT
 export const withoutRunnerFileCommands = env =>
   Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
 
+// Git settings for every git command the agent and its hooks run. Code the agent writes can plant a
+// nested repo whose own config names a command (core.fsmonitor, a clean filter); host git runs it
+// when it looks inside. Settings given through the environment beat any repo's own config and pass
+// down to git's child processes, so git stays out of nested repos and off fsmonitor. `git add` of a
+// nested repo still runs its filters, so the container wrapper also removes nested repos.
+// safe.bareRepository=explicit stops git finding a bare repo (HEAD, objects/, refs/ under any name)
+// from a folder inside it and reading that folder's config.
+export const GIT_SETTINGS = [
+  ['core.fsmonitor', 'false'], ['diff.ignoreSubmodules', 'all'], ['submodule.recurse', 'false'], ['safe.bareRepository', 'explicit'],
+];
+
+/** GIT_SETTINGS as GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n. */
+export const gitEnvironment = () => Object.fromEntries([
+  ['GIT_CONFIG_COUNT', String(GIT_SETTINGS.length)],
+  ...GIT_SETTINGS.flatMap(([key, value], i) => [[`GIT_CONFIG_KEY_${i}`, key], [`GIT_CONFIG_VALUE_${i}`, value]]),
+]);
+
 /**
- * The environment the agent (and so its hooks) runs with: without the runner's file commands, and
- * with FACTORY_DOTNET=container set last, so a caller can't switch it off. Throws without a full
- * FACTORY_BASE_SHA, which the hooks need to pin the build image.
+ * The environment the agent (and so its hooks) runs with: without the runner's file commands or the
+ * caller's GIT_CONFIG_* settings, and with FACTORY_DOTNET=container and GIT_SETTINGS set last, so a
+ * caller can't switch them off. Throws without a full FACTORY_BASE_SHA, which the hooks need to pin
+ * the build image.
  */
 export function agentEnvironment(env) {
   if (!COMMIT_SHA.test(env.FACTORY_BASE_SHA ?? '')) {
     throw new Error('FACTORY_BASE_SHA must be the full SHA of the trusted commit the run starts from, so the hooks can pin the build image.');
   }
-  return withoutRunnerFileCommands({ ...env, FACTORY_DOTNET: 'container' });
+  const callers = Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('GIT_CONFIG')));
+  return withoutRunnerFileCommands({ ...callers, FACTORY_DOTNET: 'container', ...gitEnvironment() });
 }
 
 /** Installs the pinned Claude Code into `toolDir`, unless it's there already. Returns the command to run. */
@@ -92,13 +111,15 @@ export function parseMaxTurns(text) {
  * The fixed deny rules. Read rules cover the tools that read files, and Edit rules cover Write.
  * An absolute path is written with a leading //. The runner's temp folder holds the event payload,
  * which has every comment on the issue, and the transcript; the plugin folder holds the guard hook.
+ * A `.git` anywhere in the worktree is git's config, hooks and repos, which host git trusts.
  */
 export function deniedTools({ runnerTemp, pluginDir }) {
   const absolute = folder => `/${path.resolve(folder)}/**`;
   const places = ['//proc/**', '//sys/**', '//dev/**', '//run/**', '//etc/**',
     '~/.ssh/**', '~/.config/**', '~/.gitconfig', '~/.claude/**', '~/.claude.json',
     absolute(runnerTemp), absolute(pluginDir)];
-  return places.flatMap(place => [`Read(${place})`, `Edit(${place})`]);
+  const git = ['./.git/**', './**/.git/**', './**/.git'].map(place => `Edit(${place})`);
+  return [...places.flatMap(place => [`Read(${place})`, `Edit(${place})`]), ...git];
 }
 
 // Claude Code's switches that put content (prompts, tool inputs and outputs, responses, request

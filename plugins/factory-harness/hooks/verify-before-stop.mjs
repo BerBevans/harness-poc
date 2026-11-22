@@ -23,15 +23,15 @@ export const testsRan = output => /\bTotal(?: tests)?:\s*[1-9]/.test(output);
 
 function runChecks(root, solution, deps) {
   const projects = deps.findTestProjects(root);
-  const { build, tests } = deps.runBuildAndTests(root, solution, projects);
-  if (!build.ok) return { failures: [summariseBuildFailures(build.output)], testProjectCount: 0 };
+  const { build, tests, notes } = deps.runBuildAndTests(root, solution, projects);
+  if (!build.ok) return { failures: [summariseBuildFailures(build.output), ...(notes ? [notes] : [])], testProjectCount: 0 };
 
   // A project that reports no tests passed nothing: it was skipped, or its tests were filtered out.
   const failures = tests.flatMap((result, i) =>
     !result.ok ? [summariseTestFailures(result.output)]
       : testsRan(result.output) ? []
         : [`No tests ran in ${projects[i]}. Every test project needs tests that run, with nothing filtering them out.`]);
-  return { failures, testProjectCount: projects.length };
+  return { failures: failures.length > 0 && notes ? [...failures, notes] : failures, testProjectCount: projects.length };
 }
 
 /** Returns the hook output, or null to allow the stop silently. */
