@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideStop, isValidProgressNote, MAX_FAILURE_CHARACTERS } from '../verify-before-stop.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { findSolution } from '../lib/process.mjs';
+import { decideStop, isValidProgressNote, MAX_FAILURE_CHARACTERS, testsRan } from '../verify-before-stop.mjs';
 
 function fakeDependencies(overrides = {}) {
   const calls = { builds: 0, savedGreen: null };
@@ -15,7 +19,12 @@ function fakeDependencies(overrides = {}) {
     runBuild: () => { calls.builds += 1; return { ok: true, output: '' }; },
     solutionHasProjects: () => true,
     findTestProjects: () => ['tests/App.UnitTests/App.UnitTests.csproj'],
-    runTests: () => ({ ok: true, output: '' }),
+    runTests: () => ({ ok: true, output: 'Test Run Successful.\nTotal tests: 3\n     Passed: 3' }),
+    // The real one runs everything in one container in a factory run; the fakes compose it.
+    runBuildAndTests: (root, _, projects) => {
+      const build = deps.runBuild(root);
+      return { build, tests: build.ok ? projects.map(project => deps.runTests(root, project)) : [] };
+    },
     readProgressNote: () => null,
     hasUncommittedChanges: () => false,
     ...overrides,
@@ -113,6 +122,40 @@ test('progress note statuses', () => {
   assert.ok(!isValidProgressNote('Status: finished'));
   assert.ok(!isValidProgressNote(''));
   assert.ok(!isValidProgressNote(null));
+});
+
+test('blocks when a test project passes without running any tests', () => {
+  const { deps, calls } = fakeDependencies({ runTests: () => ({ ok: true, output: 'Skipping running test for project tests/App.UnitTests' }) });
+  const output = decideStop({}, deps);
+  assert.equal(output.decision, 'block');
+  assert.match(output.reason, /No tests ran in tests\/App\.UnitTests\/App\.UnitTests\.csproj/);
+  assert.equal(calls.savedGreen, null);
+});
+
+test('a test project ran tests only when dotnet test counted at least one', () => {
+  assert.ok(testsRan('Test Run Successful.\nTotal tests: 1\n     Passed: 1'));
+  assert.ok(testsRan('Passed!  - Failed:     0, Passed:     4, Skipped:     0, Total:     4, Duration: 211 ms'));
+  assert.ok(!testsRan('Total tests: 0'));
+  assert.ok(!testsRan('Skipping running test for project /src/tests/App.UnitTests/App.UnitTests.csproj'));
+  assert.ok(!testsRan(''));
+});
+
+test('blocks when the solution to check is ambiguous', () => {
+  const output = decideStop({}, fakeDependencies({ findSolution: () => { throw new Error('more than one solution'); } }).deps);
+  assert.equal(output.decision, 'block');
+  assert.match(output.reason, /more than one solution/);
+});
+
+test('the solution is the one at the root; App.slnx beats App.sln, and any other second solution is ambiguous', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'solution-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.equal(findSolution(root), null);
+  fs.writeFileSync(path.join(root, 'App.sln'), '');
+  assert.equal(findSolution(root), 'App.sln');
+  fs.writeFileSync(path.join(root, 'App.slnx'), '');
+  assert.equal(findSolution(root), 'App.slnx');
+  fs.writeFileSync(path.join(root, 'Zz.sln'), '');
+  assert.throws(() => findSolution(root), /more than one solution \(App\.sln, App\.slnx, Zz\.sln\)/);
 });
 
 test('skips the build, records the state and tells the user when the solution has no projects', () => {
