@@ -3,6 +3,7 @@
 // Fails closed: unreadable input or an error inside a rule denies the call.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { describeChange } from './lib/change.mjs';
@@ -26,10 +27,36 @@ export function evaluate(input, context) {
   return null;
 }
 
+/**
+ * Follows symlinks in the longest part of the path that exists, dangling ones included (a link to
+ * a file not yet created), so a write through the link is checked against its target. Null if no
+ * part of the path exists.
+ */
+export function resolveLinks(filePath, hops = 0) {
+  if (hops > 40) return null;
+  let existing = filePath;
+  let rest = '';
+  while (!fs.lstatSync(existing, { throwIfNoEntry: false })) {
+    const cut = Math.max(existing.lastIndexOf('/'), existing.lastIndexOf('\\'));
+    if (cut <= 0) return null;
+    rest = existing.slice(cut) + rest;
+    existing = existing.slice(0, cut);
+  }
+  try {
+    return fs.realpathSync.native(existing) + rest;
+  } catch {
+    // realpath fails on a dangling link: follow it by hand.
+    const parent = path.dirname(existing);
+    const realParent = resolveLinks(parent, hops + 1) ?? parent;
+    return resolveLinks(path.resolve(realParent, fs.readlinkSync(existing)) + rest, hops + 1);
+  }
+}
+
 export function createContext(env = process.env) {
   return {
     home: os.homedir(),
     env,
+    realpath: filePath => resolveLinks(String(filePath)),
     readFile: filePath => {
       try {
         return fs.readFileSync(filePath, 'utf8');

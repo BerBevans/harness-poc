@@ -1,18 +1,81 @@
 // Text-level parsing of shell commands (bash and PowerShell). This is pattern matching,
 // not a shell parser: it catches the ordinary spellings and CI catches the rest.
 
-export const splitSegments = command => command.split(/&&|\|\||[;|\n]/).map(s => s.trim()).filter(Boolean);
+// Shells whose -c (or -Command) argument is itself a command line.
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd']);
+const MAX_DEPTH = 4;
 
-export const tokenise = segment => segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+// Splits on ;, |, &, &&, || and newlines that aren't inside quotes. An & next to a redirect
+// (2>&1, &>file, >&2) isn't a separator. With `backslashEscapes` (bash), a backslash escapes the
+// next character; without (PowerShell and cmd, where it separates path parts), it's ordinary.
+function splitOutsideQuotes(command, backslashEscapes) {
+  const parts = [];
+  let current = '';
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if (backslashEscapes && quote === '"' && char === '\\') { current += char + (command[++i] ?? ''); continue; }
+    if (quote) { if (char === quote) quote = null; current += char; continue; }
+    if (backslashEscapes && char === '\\') { current += char + (command[++i] ?? ''); continue; }
+    if (char === '"' || char === "'") { quote = char; current += char; continue; }
+    const separatingAmpersand = char === '&' && !/[<>]/.test(command[i - 1] ?? '') && command[i + 1] !== '>';
+    if (char === ';' || char === '|' || char === '\n' || separatingAmpersand) {
+      parts.push(current);
+      current = '';
+      if (command[i + 1] === char) i++;
+      continue;
+    }
+    current += char;
+  }
+  return [...parts, current];
+}
 
-export const unquote = token => token.replace(/^(["'])(.*)\1$/, '$2');
+// The bodies of $(...), <(...), >(...) and backtick substitutions, which run as commands of their own.
+const substitutions = command =>
+  [...command.matchAll(/[$<>]\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`/g)].map(match => match[1] ?? match[2]);
+
+/**
+ * Every simple command in a command line: split on separators outside quotes, with subshell and
+ * group brackets stripped, substitutions lifted out, and `bash -c '...'` (and the like) followed.
+ * Throws when shells nest deeper than MAX_DEPTH, so the guard fails closed.
+ */
+export function splitSegments(command, depth = 0) {
+  if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
+  const segments = [];
+  for (const body of substitutions(command)) segments.push(...splitSegments(body, depth + 1));
+  // The hook can't tell which shell will run the line, so it splits it both ways and checks every
+  // part: an extra part only ever blocks more.
+  const parts = new Set([...splitOutsideQuotes(command, true), ...splitOutsideQuotes(command, false)]);
+  for (const part of parts) {
+    const segment = part.trim().replace(/^(?:[({]\s*)+/, '').replace(/(?:\s*[)}])+$/, '').trim();
+    if (!segment) continue;
+    segments.push(segment);
+    const tokens = tokenise(segment);
+    const shell = tokens.findIndex(t => SHELLS.has(programName(t)));
+    // -c anywhere in a short-option cluster (bash -lc, sh -ec), pwsh -Command, or cmd /c. The
+    // argument after every such option is followed: pwsh -NonInteractive matches too, and
+    // following its neighbour as a command is harmless.
+    if (shell >= 0) {
+      tokens.forEach((t, i) => {
+        if (i > shell && tokens[i + 1] && /^(-[a-z]*c[a-z]*|\/c)$/i.test(t)) segments.push(...splitSegments(unquote(tokens[i + 1]), depth + 1));
+      });
+    }
+  }
+  return segments;
+}
+
+export const tokenise = segment => segment.match(/"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g) ?? [];
+
+// Inside double quotes, bash unescapes \" and \\.
+export const unquote = token =>
+  /^".*"$/s.test(token) ? token.slice(1, -1).replace(/\\(["\\$`])/g, '$1') : token.replace(/^'(.*)'$/s, '$1');
 
 const isOption = token => /^-/.test(token);
 const isEnvAssignment = token => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 
 // "C:/Program Files/Git/cmd/git.exe" -> "git"
 export const programName = token =>
-  unquote(token).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
+  unquote(token.replace(/^[({]+/, '')).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
 
 /** Every invocation of a program in the command, as its unquoted argument lists. */
 export function invocationsOf(command, program) {
@@ -50,8 +113,10 @@ const DELETES_OR_OVERWRITES_ALL_ARGS = new Set([
   'mv', 'move', 'ren', 'rename-item', 'move-item', 'mi',
   'remove-item', 'ri', 'clear-content', 'clc', 'set-content', 'sc', 'add-content', 'ac',
   'out-file', 'new-item', 'ni', 'tee-object',
+  // A link to a guarded file is a way to write it later, so ln's source counts too.
+  'ln',
 ]);
-const COPIES_TO_LAST_ARG = new Set(['cp', 'copy', 'copy-item', 'cpi', 'ln', 'install', 'xcopy', 'robocopy']);
+const COPIES_TO_LAST_ARG = new Set(['cp', 'copy', 'copy-item', 'cpi', 'install', 'xcopy', 'robocopy']);
 const EDITS_IN_PLACE = new Set(['sed', 'perl']);
 const GIT_SUBCOMMANDS_THAT_WRITE_PATHS = new Set(['checkout', 'restore', 'rm', 'mv']);
 
