@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PROGRESS_NOTE_PATH } from './next-step.mjs';
+import { dotnetRunner } from './dotnet.mjs';
 import { findSolution, gitLines, hashFile, run } from './process.mjs';
 
 const FAST_TEST_PROJECT = /\.(UnitTests|ArchitectureTests)\.csproj$/i;
@@ -51,9 +52,20 @@ const readTextOrNull = filePath => {
   }
 };
 
+/**
+ * True when the worktree is the trusted base commit, apart from the factory's own working files:
+ * nothing the agent wrote to check (a spec round, say). False without a base commit.
+ */
+export function unchangedFromBase(root, baseSha, git = gitLines) {
+  if (!baseSha || git(root, ['rev-parse', 'HEAD'])[0] !== baseSha) return false;
+  return git(root, ['status', '--porcelain', '--untracked-files=all']).every(line => line.slice(3).startsWith('.factory/'));
+}
+
 export function createStopDependencies(env) {
+  const dotnet = dotnetRunner(env);
   return {
     env,
+    unchangedFromBase: root => unchangedFromBase(root, env.FACTORY_BASE_SHA),
     repoRoot: directory => (directory ? gitLines(directory, ['rev-parse', '--show-toplevel'])[0] ?? null : null),
     findSolution,
     fingerprint,
@@ -64,20 +76,18 @@ export function createStopDependencies(env) {
       fs.writeFileSync(file, value);
     },
     runBuild: (root, solution) => {
-      const result = run('dotnet', ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'], { cwd: root, timeoutSeconds: 300 });
-      return { ok: result.ok, output: result.stdout + result.stderr };
+      return dotnet(root, ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'], 300);
     },
     // Unknown counts as having projects, so the build runs and reports the real problem.
     solutionHasProjects: (root, solution) => {
-      const result = run('dotnet', ['sln', solution, 'list'], { cwd: root, timeoutSeconds: 60 });
-      return !result.ok || result.stdout.split(/\r?\n/).some(line => /\.\w+proj\s*$/i.test(line));
+      const result = dotnet(root, ['sln', solution, 'list'], 60);
+      return !result.ok || result.output.split(/\r?\n/).some(line => /\.\w+proj\s*$/i.test(line));
     },
     findTestProjects,
     runTests: (root, project) => {
       // Quiet verbosity hides assertion messages; the console logger at normal brings them back.
       const args = ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
-      const result = run('dotnet', args, { cwd: root, timeoutSeconds: 120 });
-      return { ok: result.ok, output: result.stdout + result.stderr };
+      return dotnet(root, args, 120);
     },
     readProgressNote: root => readTextOrNull(path.join(root, PROGRESS_NOTE_PATH)),
     hasUncommittedChanges: root => gitLines(root, ['status', '--porcelain']).length > 0,

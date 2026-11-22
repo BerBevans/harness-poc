@@ -78,7 +78,7 @@ test('a run that times out is stopped, reported as a failure, and its container 
     return args[0] === 'run' ? { status: null, signal: 'SIGTERM', error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }) } : { status: 0 };
   };
   const result = runInContainer({ image: 'img', repo, args: ['test'], run, timeout: 60000 });
-  assert.deepEqual(result, { passed: false, lines: ['dotnet ran for over 1 minutes, so it was stopped.'] });
+  assert.deepEqual(result, { passed: false, lines: ['dotnet ran for over 60 seconds, so it was stopped.'], output: '' });
   const name = calls[0][calls[0].indexOf('--name') + 1];
   assert.match(name, /^factory-dotnet-/);
   assert.deepEqual(calls[1], ['rm', '--force', name]);
@@ -128,4 +128,19 @@ test('code in the container can\'t see the host environment or write to .git', t
   assert.equal(read('git.txt').trim(), 'read-only');
   assert.equal(read('root.txt').trim(), 'read-only', 'the image itself must not be writable');
   assert.ok(!fs.existsSync(path.join(repo, '.git', 'planted')));
+});
+
+test('with capture, the output is collected and Docker gets only the environment given', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-capture-'));
+  fs.mkdirSync(path.join(repo, '.git'));
+  const calls = [];
+  const run = (program, args, options) => {
+    calls.push({ args, options });
+    return args[0] === 'run' ? { status: 1, stdout: 'Build FAILED.\n', stderr: 'error CS1002' } : { status: 0 };
+  };
+  const result = runInContainer({ image: 'img', repo, args: ['build'], run, capture: true, timeout: 5000, env: { PATH: '/bin' } });
+  assert.deepEqual(result, { passed: false, lines: ['dotnet exited with 1.'], output: 'Build FAILED.\nerror CS1002' });
+  assert.deepEqual(calls[0].options, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 5000, env: { PATH: '/bin' } });
+  assert.equal(calls[1].args[0], 'rm');
+  fs.rmSync(repo, { recursive: true, force: true });
 });

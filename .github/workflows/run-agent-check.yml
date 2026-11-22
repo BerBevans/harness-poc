@@ -28,6 +28,7 @@ jobs:
       # actions folder and the plugin is checked at that path.
       - uses: BerBevans/harness-poc/actions/run-agent@main
         with:
+          base-sha: ${{ github.sha }}
           prompt: Reply with the single word ready, and do nothing else.
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: haiku
@@ -53,6 +54,7 @@ jobs:
         continue-on-error: true
         uses: ./actions/run-agent
         with:
+          base-sha: ${{ github.sha }}
           prompt: Reply with the single word ready, and do nothing else.
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: haiku
@@ -104,6 +106,7 @@ jobs:
         id: agent
         uses: ./actions/run-agent
         with:
+          base-sha: ${{ github.sha }}
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: haiku
           max-turns: 14
@@ -226,6 +229,7 @@ jobs:
         id: agent
         uses: ./actions/run-agent
         with:
+          base-sha: ${{ github.sha }}
           prompt: Use Read on ${{ steps.setup.outputs.canary }}.txt, then reply with exactly the word it holds.
           claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           model: haiku

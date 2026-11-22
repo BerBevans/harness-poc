@@ -21,7 +21,8 @@
 // Usage: node run-agent.mjs <tool folder> <transcript file>
 // Environment: AGENT_PROMPT, PLUGIN_DIR, AGENT_MAX_TURNS, AGENT_ALLOWED_TOOLS (one rule per line),
 // optional AGENT_MODEL, AGENT_ROLE, AGENT_OTEL_ENDPOINT and AGENT_OTEL_HEADERS, plus
-// CLAUDE_CODE_OAUTH_TOKEN and FACTORY_ISSUE, which pass through.
+// CLAUDE_CODE_OAUTH_TOKEN, FACTORY_ISSUE and FACTORY_BASE_SHA (required), which pass through. The run
+// sets FACTORY_DOTNET=container, so the hooks build and test only in the container.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -283,6 +284,9 @@ await runIfMain(import.meta.url, async env => {
   if (!env.PLUGIN_DIR) throw new Error('PLUGIN_DIR is empty.');
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is empty, so the run would fall back to other credentials or fail.');
   if (!env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is empty, so the deny list can\'t fence the runner\'s temp folder.');
+  if (!/^[0-9a-f]{40}$/.test(env.FACTORY_BASE_SHA ?? '')) {
+    throw new Error('FACTORY_BASE_SHA must be the full SHA of the trusted commit the run starts from, so the hooks can pin the build image.');
+  }
   // The event payload holds every comment on the issue, strangers' included, so the agent never sees
   // it. The runner only rewrites it between steps, so it stays gone for the run.
   if (env.GITHUB_EVENT_PATH) {
@@ -299,7 +303,8 @@ await runIfMain(import.meta.url, async env => {
     allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
     deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
   });
-  const telemetry = telemetryEnvironment(withoutRunnerFileCommands(env));
+  // Set last, so a caller can't switch it off: the hooks build only in the container.
+  const telemetry = telemetryEnvironment(withoutRunnerFileCommands({ ...env, FACTORY_DOTNET: 'container' }));
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   const result = await runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env: telemetry.env });
   return { ...result, lines: [telemetry.summary, ...result.lines] };

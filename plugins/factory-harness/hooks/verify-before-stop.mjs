@@ -35,6 +35,8 @@ export function decideStop(input, deps) {
 
   const root = deps.repoRoot(deps.env.CLAUDE_PROJECT_DIR || input.cwd);
   if (!root) return null;
+  // Nothing the agent changed means nothing to check: the base is checked by CI.
+  if (deps.unchangedFromBase(root)) return null;
   const solution = deps.findSolution(root);
   if (!solution) return null;
 

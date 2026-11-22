@@ -7,6 +7,7 @@ function fakeDependencies(overrides = {}) {
   const deps = {
     env: {},
     repoRoot: () => '/repo',
+    unchangedFromBase: () => false,
     findSolution: () => 'App.slnx',
     fingerprint: () => 'state-2',
     lastGreen: () => 'state-1',

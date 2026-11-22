@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { gitInvocations, hasShortFlag } from './lib/command.mjs';
 import { denyToolUse, isEntryPoint, parseInput, readStdin, writeOutput } from './lib/hook-io.mjs';
+import { inContainer } from './lib/dotnet.mjs';
 import { isGeneratedCode, normalisePath } from './lib/paths.mjs';
 import { findSolution, gitLines, hashFile, run } from './lib/process.mjs';
 
@@ -46,7 +47,10 @@ export function formatFiles(root, files) {
 }
 
 /** Returns a denial reason when formatting changed files, otherwise null. */
-export function formatBeforeCommit(input) {
+export function formatBeforeCommit(input, env = process.env) {
+  // dotnet format would run code the agent wrote (analysers, MSBuild targets) on the host. A factory
+  // run skips it rather than run it there; the build's IDE0055 and code-style rules are the gate.
+  if (inContainer(env)) return null;
   const command = input?.tool_input?.command;
   if (typeof command !== 'string') return null;
 

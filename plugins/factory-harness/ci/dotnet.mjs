@@ -114,25 +114,29 @@ export function resolveImage(env, repo, read = readAtCommit) {
 const TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
- * Runs the container with the terminal attached. Resolves to { passed, lines }. The container is
+ * Runs the container, with the terminal attached or, with `capture`, its output collected into
+ * `output`. Returns { passed, lines, output }. `env` is Docker's own environment; nothing from it
+ * reaches the container. The container is
  * named and always removed, even after a timeout, so it can't keep writing to the worktree while
  * later steps read it. (A SIGKILL of this process skips the clean-up: the workflow must check that
  * no `factory-dotnet-` container is running before it creates a token.)
  */
-export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS }) {
+export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS, capture = false, env }) {
   if (!fs.statSync(path.join(repo, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
     throw new Error(`${repo} has no .git folder to mount read-only.`);
   }
   const name = `factory-dotnet-${process.pid}-${Date.now()}`;
   let result;
   try {
-    result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { stdio: 'inherit', timeout });
+    const io = capture ? { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 } : { stdio: 'inherit' };
+    result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { ...io, timeout, ...(env ? { env } : {}) });
   } finally {
     run('docker', ['rm', '--force', name], { stdio: 'ignore' });
   }
-  if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${timeout / 60000} minutes, so it was stopped.`] };
+  const output = capture ? `${result.stdout ?? ''}${result.stderr ?? ''}` : '';
+  if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output };
   if (result.error) throw new Error(`Docker couldn't start: ${result.error.message}`);
-  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`] };
+  return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
 }
 
 await runIfMain(import.meta.url, env => {

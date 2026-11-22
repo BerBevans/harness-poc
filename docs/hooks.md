@@ -7,8 +7,8 @@ The `factory-harness` plugin's hooks give agents fast feedback when they reach f
 | Hook | Event | If the hook itself fails |
 | --- | --- | --- |
 | `guard.mjs` | PreToolUse on Bash, PowerShell, Read, Edit, Write, NotebookEdit, Grep and Glob | Blocks (fails closed, and `onFailure: block` covers a missing `node`) |
-| `format-on-commit.mjs` | PreToolUse on Bash and PowerShell; acts only on `git commit` | Allows; the build's IDE0055 and code-style rules are the gate |
-| `verify-before-stop.mjs` | Stop | Allows; CI catches a red build, and blocking could trap the session |
+| `format-on-commit.mjs` | PreToolUse on Bash and PowerShell; acts only on `git commit` | Allows; the build's IDE0055 and code-style rules are the gate. Skipped in factory runs |
+| `verify-before-stop.mjs` | Stop | Allows; CI catches a red build, and blocking could trap the session. In factory runs, a build that can't run in its container is a failed check |
 
 The guard runs five rules in order and denies on the first match:
 
@@ -27,12 +27,15 @@ Every denial ends with what to do instead. With `FACTORY_ISSUE` set by the workf
 ## The Stop hook
 
 1. Allow if `stop_hook_active` is set, so it never refuses twice in a row.
-2. Allow if there is no solution at the repo root.
-3. Allow without building if the working tree matches the last green run. The fingerprint covers `HEAD`, the uncommitted diff and untracked files, and is stored under `${CLAUDE_PLUGIN_DATA}`.
-4. Build with warnings as errors, then run the `*.UnitTests` and `*.ArchitectureTests` projects.
-5. On success, record the fingerprint and allow (with a warning to the user if there were no test projects).
-6. On failure with a valid progress note: ask for a commit if work is uncommitted, otherwise allow.
-7. Otherwise block, with only compiler errors and failing tests' names and messages, capped at 4,000 characters and with repo paths made relative.
+2. Allow without building if the worktree is still the run's base commit (`FACTORY_BASE_SHA`), apart from files under `.factory/`: the agent changed nothing, and CI checks the base. A spec round never builds.
+3. Allow if there is no solution at the repo root.
+4. Allow without building if the working tree matches the last green run. The fingerprint covers `HEAD`, the uncommitted diff and untracked files, and is stored under `${CLAUDE_PLUGIN_DATA}`.
+5. Build with warnings as errors, then run the `*.UnitTests` and `*.ArchitectureTests` projects.
+6. On success, record the fingerprint and allow (with a warning to the user if there were no test projects).
+7. On failure with a valid progress note: ask for a commit if work is uncommitted, otherwise allow.
+8. Otherwise block, with only compiler errors and failing tests' names and messages, capped at 4,000 characters and with repo paths made relative.
+
+**Where dotnet runs.** In a local session, on the host, as before: the code is the user's own and the session is watched. In a factory run, `run-agent` sets `FACTORY_DOTNET=container` (after the caller's environment, so it can't be switched off) and requires `FACTORY_BASE_SHA`, and every build, solution listing and test run goes through the container wrapper below, with the image pinned from the base commit. There is no fallback to the host: Docker missing, a bad pin or a timeout is a failed check. All the containers in one Stop share a 540-second deadline, under the hook's 600-second limit, so a container is always removed before Claude Code could kill the hook. Docker gets the session's environment without the runner file commands. The format hook doesn't run in a factory run at all, since `dotnet format` loads the agent's analysers; the build's style rules are the gate.
 
 ## Known limits and their backstops
 
