@@ -52,12 +52,26 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   { name: 'WarningLevel', pattern: /<\s*WarningLevel\b/gi },
   { name: 'NuGetAudit', pattern: /<\s*NuGetAudit\w*\b/gi },
   { name: 'CodeAnalysisRuleSet', pattern: /<\s*CodeAnalysisRuleSet\b/gi },
+  { name: 'EnableNETAnalyzers', pattern: /<\s*EnableNETAnalyzers\b/gi },
+  { name: 'CodeAnalysisTreatWarningsAsErrors', pattern: /<\s*CodeAnalysisTreatWarningsAsErrors\b/gi },
+  // A test filter or runner arguments can leave tests out of the run.
+  { name: 'VSTestTestCaseFilter', pattern: /<\s*VSTestTestCaseFilter\b/gi },
+  { name: 'VSTestCLIRunSettings', pattern: /<\s*VSTestCLIRunSettings\b/gi },
+  { name: 'TestingPlatformCommandLineArguments', pattern: /<\s*TestingPlatformCommandLineArguments\b/gi },
   // Run settings can exclude modules, classes or source files from coverage.
   { name: 'RunSettingsFilePath', pattern: /<\s*RunSettingsFilePath\b/gi },
   { name: 'VSTestSetting', pattern: /<\s*VSTestSetting\b/gi },
   // Lets a project override properties set on the command line, such as the hook-up of the build
   // settings targets.
   { name: 'TreatAsLocalProperty', pattern: /\bTreatAsLocalProperty\s*=/gi },
+  // The rules here read only .csproj, .props and .targets files, and MSBuild imports a file of any
+  // name, so an import's Project attribute must name one .props or .targets file. The attributes are
+  // walked one by one, so text inside another attribute's value can't satisfy it, and a ; (which
+  // MSBuild splits on) isn't allowed. An import split across lines is blocked; it fails safe.
+  {
+    name: 'Import of a file not named .props or .targets',
+    pattern: /<\s*Import\b(?!(?:\s+(?!Project\b)[\w.:-]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s+Project\s*=\s*(?:"[^";]*\.(?:props|targets)"|'[^';]*\.(?:props|targets)'))/gi,
+  },
   // SDK projects compile every .cs file already. An explicit Compile item can add a file that isn't
   // .cs (so the scan never reads it as code) or remove code from the build.
   { name: 'Compile item', pattern: /<\s*Compile\b/gi },

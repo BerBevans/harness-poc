@@ -85,6 +85,46 @@ describe('build settings target', { timeout: 600_000 }, () => {
     assert.doesNotMatch(output, /Consumer\.UnitTests\.csproj\]/);
   });
 
+  test('weaker analysis than the SDK default for the framework is caught', () => {
+    addToProject(`  <PropertyGroup>
+    <WarningLevel>4</WarningLevel>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+    <CodeAnalysisRuleSet>relaxed.ruleset</CodeAnalysisRuleSet>
+  </PropertyGroup>`);
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    for (const expected of [
+      /WarningLevel is '4'; it must be at least the SDK's default for net10\.0, 10\.0/, /EnableNETAnalyzers is false/,
+      /CodeAnalysisTreatWarningsAsErrors is false/, /CodeAnalysisRuleSet is 'relaxed\.ruleset'/,
+    ]) assert.match(output, expected);
+  });
+
+  test('a lowered AnalysisLevel, none or a suffix is caught, and latest or higher is allowed', () => {
+    for (const [level, expected] of [['none', /AnalysisLevel is 'none'; it must be at least 10\.0/], ['8.0', /AnalysisLevel is '8\.0'/], ['latest-minimum', /its suffix chooses the rule set/]]) {
+      const { status, output } = build(`-p:AnalysisLevel=${level}`);
+      assert.notEqual(status, 0, level);
+      assert.match(output, expected, level);
+    }
+    for (const level of ['latest', '10.0', 'latest-all']) assert.equal(build(`-p:AnalysisLevel=${level}`).status, 0, level);
+  });
+
+  test('an AnalysisLevel for a single category is caught', () => {
+    addToProject('  <PropertyGroup><AnalysisLevelSecurity>none</AnalysisLevelSecurity></PropertyGroup>');
+    const { status, output } = build();
+    assert.notEqual(status, 0);
+    assert.match(output, /error FH0001: AnalysisLevel is set for Security;/);
+  });
+
+  test('a test filter, CLI run settings or runner arguments in a project are caught', () => {
+    for (const property of ['VSTestTestCaseFilter', 'VSTestCLIRunSettings', 'TestingPlatformCommandLineArguments']) {
+      addToProject(`  <PropertyGroup><${property}>Category!=Slow</${property}></PropertyGroup>`);
+      const { status, output } = build();
+      assert.notEqual(status, 0, property);
+      assert.match(output, /error FH0001: VSTestTestCaseFilter, VSTestCLIRunSettings and TestingPlatformCommandLineArguments must be empty/, property);
+    }
+  });
+
   test('a setting weakened in an imported file with any name is caught', () => {
     fs.writeFileSync(path.join(repo, 'src/Consumer/relaxed.xml'),
       '<Project><PropertyGroup><Nullable>annotations</Nullable></PropertyGroup></Project>');
