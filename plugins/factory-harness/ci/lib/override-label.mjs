@@ -1,7 +1,17 @@
 // Override labels, shared by the checks that accept one. A label counts only when it's on the PR
-// now and the person who last added it is allowed to approve overrides. Who added it comes from
-// the PR's issue events, not the Actions event payload, so a rerun of an old run sees the labels
-// as they are now, not as they were when it first ran.
+// now, the person who last added it is allowed to approve overrides, and that person's latest
+// decisive review approves the commit the check ran on. Who added it comes from the PR's issue
+// events, not the Actions event payload, so a rerun of an old run sees the labels as they are now.
+//
+// The review ties the override to a diff: GitHub records the commit each review was submitted on,
+// so a push after the approval leaves it on an older commit. Timestamps can't do this. An agent can
+// push X, force-push back to A, wait for the owner to approve A, then fast-forward to X: X's first
+// run, and every force-push event, came before the approval.
+//
+// GitHub doesn't let anyone approve their own PR, so on a PR the owner opened from a branch in
+// this repo outside factory/, the owner's label counts without a review. That's safe because the
+// factory-apps-own-branches ruleset keeps the Apps off those branches: every commit there is the
+// owner's own. The Apps can push to factory/ branches, so a PR from one always needs the review.
 
 import { getJson } from './pull-request.mjs';
 
@@ -20,6 +30,30 @@ export async function fetchIssueEvents({ apiUrl, repository, number, token, fetc
     }
   }
   throw new Error(`PR #${number} has more than ${PAGE_SIZE * MAX_PAGES} events, so its labels can't be checked.`);
+}
+
+/** Every review on the PR. Throws if there are too many to read. */
+export async function fetchReviews({ apiUrl, repository, number, token, fetchImpl }) {
+  const reviews = [];
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const batch = await getJson(
+      `${apiUrl}/repos/${repository}/pulls/${number}/reviews?per_page=${PAGE_SIZE}&page=${page}`, token, fetchImpl);
+    reviews.push(...batch);
+    if (batch.length < PAGE_SIZE) return reviews;
+  }
+  throw new Error(`PR #${number} has more than ${PAGE_SIZE * MAX_PAGES} reviews, so its approval can't be checked.`);
+}
+
+// A comment-only review neither approves nor withdraws an approval.
+const DECISIVE = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+
+/** Whether the user's latest decisive review approves `headSha`. Reviews come oldest first; ids break ties. */
+export function approves(reviews, userId, headSha) {
+  const latest = reviews
+    .filter(review => review.user?.id === userId && DECISIVE.has(review.state))
+    .sort((a, b) => (a.submitted_at ?? '').localeCompare(b.submitted_at ?? '') || a.id - b.id)
+    .at(-1);
+  return latest?.state === 'APPROVED' && latest.commit_id === headSha;
 }
 
 /**
@@ -41,12 +75,13 @@ export function labelAppliedBy(events, label) {
  * Applies an override label to a check's failing result. An approved label turns it into a pass,
  * with its errors shown as warnings; a label anyone else applied is reported as an error.
  */
-export function overridden(result, { label, appliedBy, allowedUserIds, eventAction }) {
+export function overridden(result, { label, appliedBy, allowedUserIds, approved, headSha }) {
   if (result.passed || !appliedBy) return result;
-  // A label approves the diff it was applied to. A push changes the diff, and the reset-overrides
-  // action removes the label, so the owner reviews the new diff and applies it again.
-  if (eventAction === 'synchronize') {
-    return { passed: false, lines: [...result.lines, `::error::${label} was applied before this push, so it doesn't count. Review the new diff and apply ${label} again.`] };
+  if (allowedUserIds.includes(appliedBy.id) && !approved) {
+    return {
+      passed: false,
+      lines: [...result.lines, `::error::${appliedBy.login} applied ${label}, but their latest review doesn't approve this commit (${headSha.slice(0, 7)}). An override counts only with an approval of the diff it covers: approve the PR, then re-run this check.`],
+    };
   }
   if (allowedUserIds.includes(appliedBy.id)) {
     return {
@@ -58,4 +93,20 @@ export function overridden(result, { label, appliedBy, allowedUserIds, eventActi
     passed: false,
     lines: [...result.lines, `::error::${appliedBy.login} applied ${label}, but only the repo owner's override counts. Don't apply override labels.`],
   };
+}
+
+/**
+ * Applies the PR's override label to a failing result: reads who applied it and their reviews,
+ * then decides as `overridden` does. `api` is { apiUrl, repository, number, token, fetchImpl };
+ * `head` is the payload's pull_request.head and `authorId` the user who opened the PR.
+ */
+export async function applyOverride(result, { label, allowedUserIds, api, head, authorId }) {
+  if (result.passed) return result;
+  const headSha = head.sha;
+  const appliedBy = labelAppliedBy(await fetchIssueEvents(api), label);
+  const allowed = appliedBy !== null && allowedUserIds.includes(appliedBy.id);
+  const ownersBranch = head.repo?.full_name === api.repository && !(head.ref ?? 'factory/').startsWith('factory/');
+  const ownPullRequest = appliedBy?.id === authorId && ownersBranch;
+  const approved = allowed && (ownPullRequest || approves(await fetchReviews(api), appliedBy.id, headSha));
+  return overridden(result, { label, appliedBy, allowedUserIds, approved, headSha });
 }

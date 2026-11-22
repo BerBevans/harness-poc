@@ -1,7 +1,8 @@
 // Removes every override label from a PR when someone pushes to it. A label approves the diff it was
 // applied to; after a push the diff is different, so the owner reviews it and applies the label
-// again. The checks also ignore override labels on a push, so a check that runs before this one
-// can't pass on a stale label.
+// again. The checks don't rely on this: a label counts only with the owner's approval of the commit
+// the check ran on (lib/override-label.mjs), so a check that runs before this one can't pass on a
+// stale label.
 //
 // Usage: node reset-overrides.mjs
 // Environment: GITHUB_EVENT_NAME (pull_request_target), GITHUB_EVENT_PATH, GITHUB_API_URL,

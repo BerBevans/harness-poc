@@ -8,7 +8,7 @@
 // the implementer's spec copy, and only while it matches the issue's current spec exactly, so it
 // can't hold anything else.
 
-import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
+import { applyOverride } from './lib/override-label.mjs';
 import {
   annotation, exemptResult, getJson, incompleteListing, isExempt, parseUserIds, runIfMain, runOnPullRequest,
 } from './lib/pull-request.mjs';
@@ -159,11 +159,8 @@ export async function run({ env, fetchImpl, ...options }) {
       const specCopies = isExempt(pullRequest.author, pullRequest.exemptUserIds)
         ? [] : await findSpecCopies({ head, files: pullRequest.files, env, fetchImpl });
       const result = evaluate({ ...pullRequest, specCopies });
-      if (result.passed) return result;
-      const events = await fetchIssueEvents({
-        apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number, token: env.GITHUB_TOKEN, fetchImpl,
-      });
-      return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds, eventAction: action });
+      const api = { apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number, token: env.GITHUB_TOKEN, fetchImpl };
+      return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, head, authorId: pullRequest.author.id });
     },
   });
 }
