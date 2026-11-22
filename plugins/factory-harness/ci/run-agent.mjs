@@ -176,10 +176,16 @@ export function telemetryEnvironment(env) {
   };
 }
 
-/** Claude Code's arguments. No --bare: bare mode ignores CLAUDE_CODE_OAUTH_TOKEN. */
+/**
+ * Claude Code's arguments. No --bare: bare mode ignores CLAUDE_CODE_OAUTH_TOKEN. An empty
+ * --setting-sources loads no user, project or local settings file, so a checked-out
+ * .claude/settings.json can't add hooks (which run with this step's environment), env values that
+ * get past the telemetry strip, or allow rules that get past the fence.
+ */
 export function agentArguments({ prompt, pluginDir, model, maxTurns, allowedTools, deny }) {
   return [
     '-p', prompt,
+    '--setting-sources', '',
     '--plugin-dir', pluginDir,
     '--output-format', 'stream-json', '--verbose',
     '--permission-mode', 'dontAsk',

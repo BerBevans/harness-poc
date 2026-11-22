@@ -5,8 +5,10 @@ description: >
   Claude Code, authenticates with a claude setup-token OAuth token, and fails the run at startup
   unless the plugin loaded. The transcript goes to a file, not the job log, which is public on a
   public repo. Deletes the event payload file before the agent starts, because it holds every
-  comment on the issue: later steps must read event data from the github context instead. With an
-  OTLP endpoint, exports Claude Code's metrics and events, never prompts or tool content.
+  comment on the issue: later steps must read event data from the github context instead. Loads no
+  user, project or local settings file, so a checked-out .claude/settings.json can't add hooks, env
+  values or allow rules. With an OTLP endpoint, exports Claude Code's metrics and events, never
+  prompts or tool content.
 
 inputs:
   prompt:
