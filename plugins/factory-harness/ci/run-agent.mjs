@@ -46,7 +46,11 @@ export const withoutRunnerFileCommands = env =>
 // when it looks inside. Settings given through the environment beat any repo's own config and pass
 // down to git's child processes, so git stays out of nested repos and off fsmonitor. `git add` of a
 // nested repo still runs its filters, so the container wrapper also removes nested repos.
-export const GIT_SETTINGS = [['core.fsmonitor', 'false'], ['diff.ignoreSubmodules', 'all'], ['submodule.recurse', 'false']];
+// safe.bareRepository=explicit stops git finding a bare repo (HEAD, objects/, refs/ under any name)
+// from a folder inside it and reading that folder's config.
+export const GIT_SETTINGS = [
+  ['core.fsmonitor', 'false'], ['diff.ignoreSubmodules', 'all'], ['submodule.recurse', 'false'], ['safe.bareRepository', 'explicit'],
+];
 
 /** GIT_SETTINGS as GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n and GIT_CONFIG_VALUE_n. */
 export const gitEnvironment = () => Object.fromEntries([

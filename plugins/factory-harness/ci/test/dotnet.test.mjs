@@ -156,11 +156,20 @@ test('every .git in the repo but its own is removed, and links are never followe
   fs.writeFileSync(path.join(repo, 'bin/Debug/.GIT'), '');
   fs.symlinkSync(outside, path.join(repo, 'linked'));
   fs.symlinkSync(path.join(outside, '.git'), path.join(repo, 'b/.git'));
-  assert.deepEqual(removeNestedRepos(repo), ['b/.git', 'b/c/.git', 'bin/Debug/.GIT', 'src/x/.git']);
+  assert.deepEqual(removeNestedRepos(repo), { removed: ['b/.git', 'b/c/.git', 'bin/Debug/.GIT', 'src/x/.git'], unchecked: [] });
   assert.ok(fs.existsSync(path.join(repo, '.git/hooks')), 'the repo\'s own .git stays');
   assert.ok(fs.existsSync(path.join(outside, '.git')), 'a link is removed, never followed');
   assert.ok(fs.existsSync(path.join(repo, 'src/x')));
-  assert.deepEqual(removeNestedRepos(repo), []);
+  assert.deepEqual(removeNestedRepos(repo), { removed: [], unchecked: [] });
+});
+
+test('a folder made unreadable is searched anyway, and so is everything after it', { skip: (process.platform === 'win32' || process.getuid?.() === 0) && 'needs POSIX permissions and a non-root user' }, t => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-locked-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  for (const folder of ['.git', 'aaa/.git', 'zzz/.git']) fs.mkdirSync(path.join(repo, folder), { recursive: true });
+  fs.chmodSync(path.join(repo, 'aaa'), 0);
+  fs.chmodSync(path.join(repo, 'zzz/.git'), 0);
+  assert.deepEqual(removeNestedRepos(repo), { removed: ['aaa/.git', 'zzz/.git'], unchecked: [] });
 });
 
 test('a run that creates a git repo in the repo fails, keeping its output, and the repo is removed', t => {
@@ -175,6 +184,18 @@ test('a run that creates a git repo in the repo fails, keeping its output, and t
   assert.equal(result.passed, false);
   assert.equal(result.output, 'Build succeeded.\n');
   assert.match(result.lines.at(-1), /created git repositories inside the repo \(x\/\.git\)/);
+  assert.equal(fs.existsSync(path.join(repo, 'x/.git')), false);
+});
+
+test('a run that ends in an error, such as output past the capture limit, still removes nested repos', t => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-error-'));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(repo, '.git'));
+  const run = (program, args) => {
+    if (args[0] === 'run') fs.mkdirSync(path.join(repo, 'x/.git'), { recursive: true });
+    return args[0] === 'run' ? { status: null, error: Object.assign(new Error('spawnSync docker ENOBUFS'), { code: 'ENOBUFS' }) } : { status: 0 };
+  };
+  assert.throws(() => runInContainer({ image: 'img', repo, args: ['build'], run, capture: true }), /ENOBUFS/);
   assert.equal(fs.existsSync(path.join(repo, 'x/.git')), false);
 });
 

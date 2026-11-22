@@ -35,18 +35,19 @@ test('the Stop hook can run several steps in one container through another entry
 
 test('the checks container\'s output splits at its status lines; a step without one failed', () => {
   const projects = ['A.UnitTests.csproj', 'B.ArchitectureTests.csproj'];
-  assert.deepEqual(splitChecks('built\n@@factory 0\nA passed\n@@factory 0\nB failed\n@@factory 1\n', projects), {
+  assert.deepEqual(splitChecks('built\n@@factory 0\nA passed\n@@factory 0\nB failed\n@@factory 1\nRemoved x/.git', projects), {
     build: { ok: true, output: 'built\n' },
     tests: [{ ok: true, output: '\nA passed\n' }, { ok: false, output: '\nB failed\n' }],
+    notes: 'Removed x/.git',
   });
-  assert.deepEqual(splitChecks('error CS1002\n@@factory 1\n', projects), { build: { ok: false, output: 'error CS1002\n' }, tests: [] });
+  assert.deepEqual(splitChecks('error CS1002\n@@factory 1\n', projects), { build: { ok: false, output: 'error CS1002\n' }, tests: [], notes: '' });
   const timedOut = splitChecks('built\n@@factory 0\nA hung', projects);
   assert.equal(timedOut.tests.length, 1, 'steps after the unfinished one never ran');
   assert.equal(timedOut.tests[0].ok, false);
   assert.match(timedOut.tests[0].output, /A hung\nThis step didn't finish\./);
   assert.equal(splitChecks('dotnet ran for over 540 seconds', projects).build.ok, false);
   const removedRepo = 'built\n@@factory 0\nA\n@@factory 0\nB\n@@factory 0\nThe run created git repositories inside the repo (x/.git)';
-  assert.deepEqual(splitChecks(removedRepo, projects, false), { build: { ok: false, output: removedRepo }, tests: [] }, 'a failure after the last step still fails');
+  assert.deepEqual(splitChecks(removedRepo, projects, false), { build: { ok: false, output: removedRepo }, tests: [], notes: '' }, 'a failure after the last step still fails');
   assert.equal(splitChecks(removedRepo, projects, true).build.ok, true);
 });
 

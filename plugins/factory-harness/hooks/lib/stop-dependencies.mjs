@@ -39,7 +39,7 @@ done`;
 /**
  * Splits the checks container's output at its status lines into the build's result and each test
  * project's. The first step with no status line (the container timed out or died) failed, and the
- * steps after it never ran, so they aren't reported. A run that failed after every step passed
+ * steps after it never ran, so they aren't reported. `notes` is any text after the last status line. A run that failed after every step passed
  * (the wrapper removed a git repo it created, say) fails the build, with the whole output.
  */
 export function splitChecks(output, projects, ok = true) {
@@ -48,11 +48,14 @@ export function splitChecks(output, projects, ok = true) {
   for (let i = 0; i + 1 < parts.length; i += 2) steps.push({ ok: parts[i + 1] === '0', output: parts[i] });
   const unfinished = { ok: false, output: `${parts.at(-1)}\nThis step didn't finish.`.trim() };
   const build = steps[0] ?? unfinished;
-  if (!build.ok) return { build, tests: [] };
+  // Text after the last status line is the wrapper's own (a removed git repo, say), kept apart so the
+  // failure summaries, which keep only errors and failed tests, don't drop it.
+  const notes = steps.length > 0 ? parts.at(-1).trim() : '';
+  if (!build.ok) return { build, tests: [], notes };
   const tests = steps.slice(1, projects.length + 1);
-  if (tests.length < projects.length) return { build, tests: [...tests, unfinished] };
-  if (!ok && tests.every(test => test.ok)) return { build: { ok: false, output }, tests: [] };
-  return { build, tests };
+  if (tests.length < projects.length) return { build, tests: [...tests, unfinished], notes: '' };
+  if (!ok && tests.every(test => test.ok)) return { build: { ok: false, output }, tests: [], notes: '' };
+  return { build, tests, notes };
 }
 
 export function findTestProjects(root) {
