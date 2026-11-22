@@ -142,7 +142,7 @@ async function runCheck({ files, events, reviews = [approval()], overrideUserIds
     GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: 'event.json', GITHUB_API_URL: 'https://api.github.test',
     GITHUB_REPOSITORY: 'owner/product', GITHUB_TOKEN: 'token', EXEMPT_USER_IDS: '1001', OVERRIDE_USER_IDS: overrideUserIds,
   };
-  const readEvent = () => ({ pull_request: { number: 7, user: AGENT, changed_files: files.length, head: { sha: HEAD } } });
+  const readEvent = () => ({ pull_request: { number: 7, user: AGENT, changed_files: files.length, head: { sha: HEAD, ref: 'factory/issue-7', repo: { full_name: 'owner/product' } } } });
   const result = await run({ env, readEvent, fetchImpl: api.fetchImpl });
   return { result, urls: api.urls };
 }

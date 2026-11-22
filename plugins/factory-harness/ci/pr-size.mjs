@@ -160,7 +160,7 @@ export async function run({ env, fetchImpl, ...options }) {
         ? [] : await findSpecCopies({ head, files: pullRequest.files, env, fetchImpl });
       const result = evaluate({ ...pullRequest, specCopies });
       const api = { apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number, token: env.GITHUB_TOKEN, fetchImpl };
-      return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: head.sha, authorId: pullRequest.author.id });
+      return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, head, authorId: pullRequest.author.id });
     },
   });
 }

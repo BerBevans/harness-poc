@@ -100,6 +100,7 @@ function fakeEventsApi(events, { status = 200, reviews = [] } = {}) {
 }
 
 const fetchArgs = fetchImpl => ({ apiUrl: 'https://api', repository: 'o/r', number: 7, token: 't', fetchImpl });
+const branch = (ref = 'fix-coverage', sha = HEAD, repository = 'o/r') => ({ sha, ref, repo: { full_name: repository } });
 
 test('reads every page of events and sorts them oldest first', async () => {
   const events = Array.from({ length: 150 }, () => event('labeled', AGENT)).reverse();
@@ -133,16 +134,16 @@ test('reads every page of reviews; too many is an error rather than no approval'
 
 test('applyOverride: the owner approves the head and labels it; an approval of an older commit does not count', async () => {
   const run = (reviews, headSha = HEAD) => applyOverride(failing,
-    { label: LABEL, allowedUserIds: [1001], api: fetchArgs(fakeEventsApi([event('labeled', OWNER)], { reviews }).fetchImpl), headSha });
+    { label: LABEL, allowedUserIds: [1001], api: fetchArgs(fakeEventsApi([event('labeled', OWNER)], { reviews }).fetchImpl), head: branch(undefined, headSha) });
   assert.equal((await run([review('APPROVED')])).passed, true);
   assert.equal((await run([review('APPROVED', OLD)])).passed, false);
   assert.equal((await run([review('APPROVED')], OLD)).passed, false);
 });
 
 test('applyOverride: on the owner\'s own PR, which GitHub won\'t let them approve, their label counts without a review', async () => {
-  const run = (applier, authorId) => {
+  const run = (applier, authorId, head = branch()) => {
     const api = fakeEventsApi([event('labeled', applier)]);
-    return applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), headSha: HEAD, authorId })
+    return applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), head, authorId })
       .then(result => ({ result, urls: api.urls }));
   };
   const own = await run(OWNER, OWNER.id);
@@ -152,12 +153,20 @@ test('applyOverride: on the owner\'s own PR, which GitHub won\'t let them approv
   assert.equal((await run(AGENT, AGENT.id)).result.passed, false);
 });
 
+test('applyOverride: the owner\'s own PR from a factory/ branch, or from a fork, still needs a review', async () => {
+  for (const head of [branch('factory/issue-35'), branch('fix-coverage', HEAD, 'someone/fork'), { sha: HEAD }]) {
+    const api = fakeEventsApi([event('labeled', OWNER)]);
+    const result = await applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), head, authorId: OWNER.id });
+    assert.equal(result.passed, false, JSON.stringify(head));
+  }
+});
+
 test('applyOverride: an agent\'s label fails even with the owner\'s approval, and a passing result reads nothing', async () => {
   const api = fakeEventsApi([event('labeled', AGENT)], { reviews: [review('APPROVED')] });
-  const result = await applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), headSha: HEAD });
+  const result = await applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), head: branch() });
   assert.match(result.lines.at(-1), /only the repo owner's override counts/);
   const quiet = fakeEventsApi([]);
   const passing = { passed: true, lines: ['Coverage held.'] };
-  assert.equal(await applyOverride(passing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(quiet.fetchImpl), headSha: HEAD }), passing);
+  assert.equal(await applyOverride(passing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(quiet.fetchImpl), head: branch() }), passing);
   assert.deepEqual(quiet.urls, []);
 });

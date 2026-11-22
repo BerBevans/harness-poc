@@ -211,7 +211,7 @@ async function runCompare(t, { current, baseline, events = [], reviews = [approv
       GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
       GITHUB_REPOSITORY: 'o/r',
       GITHUB_TOKEN: 't',
-      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7, user: author, head: { sha: HEAD } } }),
+      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7, user: author, head: { sha: HEAD, ref: 'fix-coverage', repo: { full_name: 'o/r' } } } }),
       OVERRIDE_USER_IDS: overrideUserIds,
     },
   });

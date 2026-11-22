@@ -109,5 +109,5 @@ await runIfMain(import.meta.url, async env => {
     runStryker: (args, cwd) => spawnSync(stryker, args, { cwd, stdio: 'inherit' }),
   });
   if (result.passed || !overridable) return result;
-  return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: pr.head.sha, authorId: pr.user?.id });
+  return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, head: pr.head, authorId: pr.user?.id });
 });
