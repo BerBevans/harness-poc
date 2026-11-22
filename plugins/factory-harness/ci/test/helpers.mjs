@@ -10,6 +10,7 @@ export const GUARDRAIL_EXAMPLES = [
   'tests/Tasks.ArchitectureTests/LayerTests.cs', 'Dockerfile', 'src/Web/Dockerfile', '.dockerignore',
   'deploy/compose.yaml', 'src/Directory.Build.rsp', 'MSBuild.rsp', 'Directory.Solution.props', 'Directory.Solution.targets',
   'src/App/App.csproj.user', 'after.App.sln.targets', 'before.App.slnx.targets',
+  'src/App/obj/App.csproj.x.props', 'build/Traversal.proj.user',
 ];
 
 // Files that are neither guardrails nor human-owned docs.

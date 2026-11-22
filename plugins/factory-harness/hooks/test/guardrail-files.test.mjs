@@ -20,6 +20,7 @@ decisionTable({
     ['Write of Directory.Solution.targets', write(inRepo('Directory.Solution.targets'), '<Project />')],
     ['Write of a project .user file', write(inRepo('src\\App\\App.csproj.user'), '<Project />')],
     ['Write of after.<sln>.targets', write(inRepo('after.App.sln.targets'), '<Project />')],
+    ['Write under obj, which MSBuild imports from', write(inRepo('src\\App\\obj\\App.csproj.x.props'), '<Project />')],
     ['Write of tool manifest', write(inRepo('.config\\dotnet-tools.json'), '{}')],
     ['Edit of Stryker config', edit(inRepo('stryker-config.json'), '75', '50')],
     ['Write of a .runsettings file', write(inRepo('tests\\coverage.runsettings'), '<RunSettings />')],

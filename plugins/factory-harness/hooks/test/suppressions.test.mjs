@@ -62,7 +62,6 @@ decisionTable({
     ['[DebuggerDisplay]', edit(code, 'a', '[DebuggerDisplay("{Name}")]')],
     ['ExcludeFromCodeCoverage in generated code', write(`${REPO}\\src\\Tasks\\Model.g.cs`, '[ExcludeFromCodeCoverage]\nclass A {}')],
     ['pragma in generated code', write(`${REPO}\\src\\Tasks\\Model.g.cs`, '#pragma warning disable\nclass A {}')],
-    ['pragma under obj', write(`${REPO}\\src\\Tasks\\obj\\Debug\\Generated.cs`, '#pragma warning disable')],
     ['pragma mentioned in markdown', write(`${REPO}\\docs\\notes.md`, 'never use #pragma warning disable')],
     ['package reference in a csproj', edit(project, '<ItemGroup>', '<ItemGroup>\n<PackageReference Include="Vogen" />')],
     ['grep for pragmas', bash('grep -rn "#pragma warning disable" src')],
