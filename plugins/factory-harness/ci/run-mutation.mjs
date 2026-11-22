@@ -13,7 +13,7 @@ import path from 'node:path';
 import { readRecords } from './build-settings-report.mjs';
 import { OVERRIDE_LABEL, evaluate, selectRuns, tally, untestableResult } from './mutation.mjs';
 import { projectName } from './run-tests.mjs';
-import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
+import { applyOverride } from './lib/override-label.mjs';
 import { fetchChangedFiles, incompleteListing, parseUserIds, runIfMain } from './lib/pull-request.mjs';
 
 export const STRYKER_VERSION = '5.0.0';
@@ -109,6 +109,5 @@ await runIfMain(import.meta.url, async env => {
     runStryker: (args, cwd) => spawnSync(stryker, args, { cwd, stdio: 'inherit' }),
   });
   if (result.passed || !overridable) return result;
-  const appliedBy = labelAppliedBy(await fetchIssueEvents(api), OVERRIDE_LABEL);
-  return overridden(result, { label: OVERRIDE_LABEL, appliedBy, allowedUserIds, eventAction: event.action });
+  return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: pr.head.sha });
 });

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readRecords } from './build-settings-report.mjs';
 import { projectName } from './run-tests.mjs';
-import { fetchIssueEvents, labelAppliedBy, overridden } from './lib/override-label.mjs';
+import { applyOverride } from './lib/override-label.mjs';
 import { annotation, getJson, parseUserIds, runIfMain } from './lib/pull-request.mjs';
 
 export const BASELINE_ARTIFACT = 'coverage-baseline';
@@ -223,14 +223,9 @@ await runIfMain(import.meta.url, async env => {
     const allowedUserIds = parseUserIds(env.OVERRIDE_USER_IDS, 'OVERRIDE_USER_IDS');
     const result = compare({ current: readFigure(args[0]), baseline: readFigure(args[1]) });
     if (result.passed) return result;
-    const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
-    const events = await fetchIssueEvents({
-      apiUrl: env.GITHUB_API_URL,
-      repository: env.GITHUB_REPOSITORY,
-      number: event.pull_request.number,
-      token: env.GITHUB_TOKEN,
-    });
-    return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds, eventAction: event.action });
+    const { pull_request: pr } = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
+    const api = { apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number: pr.number, token: env.GITHUB_TOKEN };
+    return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: pr.head.sha });
   }
   throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file> | find-baseline | compare <figure> <baseline>');
 });

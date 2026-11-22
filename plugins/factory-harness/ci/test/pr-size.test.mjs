@@ -119,12 +119,12 @@ test('a listing with fewer files than the PR changed fails', () => {
 });
 
 // A fake GitHub API serving the PR's files and its issue events, recording the URLs asked for.
-function fakeGitHub({ files, events = [] }) {
+function fakeGitHub({ files, events = [], reviews = [] }) {
   const urls = [];
   const fetchImpl = async url => {
     urls.push(url);
     const page = Number(new URL(url).searchParams.get('page'));
-    const items = url.includes('/events') ? events : files;
+    const items = url.includes('/events') ? events : url.includes('/reviews') ? reviews : files;
     return { ok: true, status: 200, json: async () => items.slice((page - 1) * 100, page * 100) };
   };
   return { urls, fetchImpl };
@@ -133,13 +133,16 @@ function fakeGitHub({ files, events = [] }) {
 const labeled = (login, id, name = 'size-override') =>
   ({ id: 1, event: 'labeled', actor: { login, id }, label: { name }, created_at: '2026-10-23T10:00:00Z' });
 
-async function runCheck({ files, events, overrideUserIds = '1001', eventName = 'pull_request_target' }) {
-  const api = fakeGitHub({ files, events });
+const HEAD = 'c'.repeat(40);
+const approval = (commit = HEAD) => ({ id: 1, user: { login: 'owner', id: 1001 }, state: 'APPROVED', commit_id: commit, submitted_at: '2026-10-23T09:00:00Z' });
+
+async function runCheck({ files, events, reviews = [approval()], overrideUserIds = '1001', eventName = 'pull_request_target' }) {
+  const api = fakeGitHub({ files, events, reviews });
   const env = {
     GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: 'event.json', GITHUB_API_URL: 'https://api.github.test',
     GITHUB_REPOSITORY: 'owner/product', GITHUB_TOKEN: 'token', EXEMPT_USER_IDS: '1001', OVERRIDE_USER_IDS: overrideUserIds,
   };
-  const readEvent = () => ({ pull_request: { number: 7, user: AGENT, changed_files: files.length } });
+  const readEvent = () => ({ pull_request: { number: 7, user: AGENT, changed_files: files.length, head: { sha: HEAD } } });
   const result = await run({ env, readEvent, fetchImpl: api.fetchImpl });
   return { result, urls: api.urls };
 }
@@ -151,6 +154,12 @@ test("an oversized PR passes with the owner's size-override label, its errors sh
   assert.equal(result.passed, true);
   assert.match(result.lines[0], /^::warning::301 changed lines/);
   assert.equal(result.lines.at(-1), 'Accepted, because owner applied size-override.');
+});
+
+test("the owner's size-override label does not count without their approval of the head commit", async () => {
+  const { result } = await runCheck({ files: tooLarge, events: [labeled('owner', 1001)], reviews: [approval('d'.repeat(40))] });
+  assert.equal(result.passed, false);
+  assert.match(result.lines.at(-1), /doesn't approve this commit \(ccccccc\)/);
 });
 
 test("an agent's size-override label does not count", async () => {

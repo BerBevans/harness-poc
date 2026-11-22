@@ -188,12 +188,16 @@ test('no baseline is an error, not a pass', async () => {
   }), /or it expired/);
 });
 
+const HEAD = 'e'.repeat(40);
+const approval = { id: 1, user: { login: 'owner', id: 1001 }, state: 'APPROVED', commit_id: HEAD, submitted_at: '2026-10-20T09:00:00Z' };
+
 // Runs `coverage.mjs compare` as the action does, against a local server standing in for the
 // GitHub API, which serves the PR's issue events.
-async function runCompare(t, { current, baseline, events = [], overrideUserIds = '1001' }) {
+async function runCompare(t, { current, baseline, events = [], reviews = [approval], overrideUserIds = '1001' }) {
   const server = http.createServer((request, response) => {
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify(request.url.includes('page=1') ? events : []));
+    const items = request.url.includes('/reviews') ? reviews : events;
+    response.end(JSON.stringify(request.url.includes('page=1') ? items : []));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'compare-'));
@@ -207,7 +211,7 @@ async function runCompare(t, { current, baseline, events = [], overrideUserIds =
       GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
       GITHUB_REPOSITORY: 'o/r',
       GITHUB_TOKEN: 't',
-      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7 } }),
+      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7, head: { sha: HEAD } } }),
       OVERRIDE_USER_IDS: overrideUserIds,
     },
   });
@@ -225,6 +229,10 @@ test('a drop passes with the owner\'s coverage-override label, and fails without
   assert.equal(approved.status, 0, approved.output);
   assert.match(approved.output, /::warning::Core code line coverage fell by 1\.00/);
   assert.match(approved.output, /Accepted, because owner applied coverage-override\./);
+
+  const unapproved = await runCompare(t, { ...drop, events: [labeled('owner', 1001)], reviews: [] });
+  assert.notEqual(unapproved.status, 0);
+  assert.match(unapproved.output, /doesn't approve this commit \(eeeeeee\)/);
 
   const agent = await runCompare(t, { ...drop, events: [labeled('factory-agent[bot]', 2002)] });
   assert.equal(agent.status, 1, agent.output);
