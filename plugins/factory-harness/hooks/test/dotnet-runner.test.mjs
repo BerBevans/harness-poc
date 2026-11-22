@@ -52,11 +52,17 @@ test('a container that can\'t run, or an image that can\'t be resolved, is a fai
 
 test('the worktree is unchanged from the base only at the base commit, with nothing but factory files changed', () => {
   const base = 'b'.repeat(40);
-  const git = (head, status) => (root, args) => (args[0] === 'rev-parse' ? [head] : status);
+  const calls = [];
+  const git = (head, status, statusOk = true) => args => {
+    calls.push(args);
+    return args[0] === 'rev-parse' ? { ok: true, stdout: `${head}\n` } : { ok: statusOk, stdout: status.join('\n') };
+  };
   assert.equal(unchangedFromBase('/repo', base, git(base, ['?? .factory/run/output.md'])), true);
   assert.equal(unchangedFromBase('/repo', base, git(base, ['?? src/New.cs'])), false);
   assert.equal(unchangedFromBase('/repo', base, git('c'.repeat(40), [])), false);
   assert.equal(unchangedFromBase('/repo', undefined, git(base, [])), false);
+  assert.equal(unchangedFromBase('/repo', base, git(base, [], false)), false, 'a failed status counts as changed');
+  assert.ok(calls.some(args => args.includes('--no-renames')), 'a move out of .factory/ must show where it landed');
 });
 
 test('the Stop hook checks nothing when the worktree is the base commit', () => {

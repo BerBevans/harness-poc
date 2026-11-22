@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  agentEnvironment,
   CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment, RUNNER_FILE_COMMANDS, withoutRunnerFileCommands,
 } from '../run-agent.mjs';
 
@@ -217,4 +218,18 @@ test('resource attributes name the role, model, issue and run, encoded, and skip
     resourceAttributes({ AGENT_ROLE: 'spec', AGENT_MODEL: 'sonnet', FACTORY_ISSUE: '35', GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '9' }),
     'factory.role=spec,factory.model=sonnet,factory.issue=35,github.repository=o%2Fr,github.run_id=9');
   assert.equal(resourceAttributes({}), 'factory.model=default');
+});
+
+test('the agent always gets FACTORY_DOTNET=container, whatever the caller set, and no runner file commands', () => {
+  const env = agentEnvironment({ FACTORY_BASE_SHA: 'a'.repeat(40), FACTORY_DOTNET: 'host', GITHUB_ENV: '/runner/env', PATH: '/bin' });
+  assert.equal(env.FACTORY_DOTNET, 'container');
+  assert.equal(env.GITHUB_ENV, undefined);
+  assert.equal(env.PATH, '/bin');
+});
+
+test('the agent doesn\'t start without a full base commit SHA', () => {
+  for (const sha of [undefined, '', 'abc123', 'main', 'A'.repeat(40)]) {
+    assert.throws(() => agentEnvironment({ FACTORY_BASE_SHA: sha }), /FACTORY_BASE_SHA must be the full SHA/, String(sha));
+  }
+  assert.equal(agentEnvironment({ FACTORY_BASE_SHA: 'b'.repeat(64) }).FACTORY_DOTNET, 'container');
 });

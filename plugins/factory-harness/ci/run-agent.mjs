@@ -28,6 +28,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { COMMIT_SHA } from './dotnet.mjs';
 import { runIfMain } from './lib/pull-request.mjs';
 
 export const CLAUDE_CODE_VERSION = '2.1.310';
@@ -39,6 +40,18 @@ export const RUNNER_FILE_COMMANDS = ['GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_OUTPUT
 
 export const withoutRunnerFileCommands = env =>
   Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
+
+/**
+ * The environment the agent (and so its hooks) runs with: without the runner's file commands, and
+ * with FACTORY_DOTNET=container set last, so a caller can't switch it off. Throws without a full
+ * FACTORY_BASE_SHA, which the hooks need to pin the build image.
+ */
+export function agentEnvironment(env) {
+  if (!COMMIT_SHA.test(env.FACTORY_BASE_SHA ?? '')) {
+    throw new Error('FACTORY_BASE_SHA must be the full SHA of the trusted commit the run starts from, so the hooks can pin the build image.');
+  }
+  return withoutRunnerFileCommands({ ...env, FACTORY_DOTNET: 'container' });
+}
 
 /** Installs the pinned Claude Code into `toolDir`, unless it's there already. Returns the command to run. */
 export function installClaudeCode(toolDir, runNpm = args => spawnSync('npm', args, { encoding: 'utf8' })) {
@@ -284,9 +297,6 @@ await runIfMain(import.meta.url, async env => {
   if (!env.PLUGIN_DIR) throw new Error('PLUGIN_DIR is empty.');
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error('CLAUDE_CODE_OAUTH_TOKEN is empty, so the run would fall back to other credentials or fail.');
   if (!env.RUNNER_TEMP) throw new Error('RUNNER_TEMP is empty, so the deny list can\'t fence the runner\'s temp folder.');
-  if (!/^[0-9a-f]{40}$/.test(env.FACTORY_BASE_SHA ?? '')) {
-    throw new Error('FACTORY_BASE_SHA must be the full SHA of the trusted commit the run starts from, so the hooks can pin the build image.');
-  }
   // The event payload holds every comment on the issue, strangers' included, so the agent never sees
   // it. The runner only rewrites it between steps, so it stays gone for the run.
   if (env.GITHUB_EVENT_PATH) {
@@ -303,8 +313,7 @@ await runIfMain(import.meta.url, async env => {
     allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
     deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
   });
-  // Set last, so a caller can't switch it off: the hooks build only in the container.
-  const telemetry = telemetryEnvironment(withoutRunnerFileCommands({ ...env, FACTORY_DOTNET: 'container' }));
+  const telemetry = telemetryEnvironment(agentEnvironment(env));
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   const result = await runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env: telemetry.env });
   return { ...result, lines: [telemetry.summary, ...result.lines] };

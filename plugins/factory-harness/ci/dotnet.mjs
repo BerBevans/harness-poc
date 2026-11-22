@@ -41,7 +41,7 @@ export function parseRequest(argv) {
 const isProjectPath = arg =>
   !/^[-@]/.test(arg) && !path.isAbsolute(arg) && !arg.split(/[\\/]/).includes('..');
 
-const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+export const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
 const IMAGE = /^\s*FROM\s+(\S+\/dotnet\/sdk:(\S+?)@sha256:[0-9a-f]{64})\s+AS\s+build\s*$/im;
 
@@ -131,7 +131,7 @@ export function runInContainer({ image, repo, entrypoint, args, run = spawnSync,
     const io = capture ? { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 } : { stdio: 'inherit' };
     result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { ...io, timeout, ...(env ? { env } : {}) });
   } finally {
-    run('docker', ['rm', '--force', name], { stdio: 'ignore' });
+    run('docker', ['rm', '--force', name], { stdio: 'ignore', timeout: 30000 });
   }
   const output = capture ? `${result.stdout ?? ''}${result.stderr ?? ''}` : '';
   if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output };

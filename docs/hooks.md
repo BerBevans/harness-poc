@@ -197,6 +197,8 @@ A `claude -p` run never shows the trust dialog, and it ignores `extraKnownMarket
 - uses: actions/checkout@v7
 - uses: <owner>/harness-poc/actions/run-agent@v0.14.4
   with:
+    # The trusted commit the run starts from: the default branch for an issue, never a PR's merge commit.
+    base-sha: ${{ github.sha }}
     prompt: <the agent's prompt>
     claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     issue: ${{ github.event.issue.number }}

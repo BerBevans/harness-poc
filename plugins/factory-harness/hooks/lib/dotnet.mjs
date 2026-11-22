@@ -32,7 +32,7 @@ export function dotnetRunner(env, { now = Date.now, runContainer = runInContaine
     try {
       const result = runContainer({ image: image(env, root), repo: root, args, capture: true, timeout, env: dockerEnv });
       // The repo is mounted at /src; paths read as the host's, so the Stop hook can make them relative.
-      const output = [result.output, ...result.lines].filter(Boolean).join('\n').replace(/(^|[\s[('"])\/src\//gm, `$1${root}/`);
+      const output = [result.output, ...result.lines].filter(Boolean).join('\n').replace(/(^|[\s[('"])\/src\//gm, (match, before) => `${before}${root}/`);
       return { ok: result.passed, output };
     } catch (error) {
       return { ok: false, output: `dotnet couldn't run in its container (${error.message}). A factory run never falls back to the host.` };

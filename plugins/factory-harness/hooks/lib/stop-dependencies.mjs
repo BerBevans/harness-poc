@@ -56,9 +56,14 @@ const readTextOrNull = filePath => {
  * True when the worktree is the trusted base commit, apart from the factory's own working files:
  * nothing the agent wrote to check (a spec round, say). False without a base commit.
  */
-export function unchangedFromBase(root, baseSha, git = gitLines) {
-  if (!baseSha || git(root, ['rev-parse', 'HEAD'])[0] !== baseSha) return false;
-  return git(root, ['status', '--porcelain', '--untracked-files=all']).every(line => line.slice(3).startsWith('.factory/'));
+export function unchangedFromBase(root, baseSha, git = (args => run('git', ['-C', root, ...args], { timeoutSeconds: 30 }))) {
+  if (!baseSha) return false;
+  const head = git(['rev-parse', 'HEAD']);
+  if (!head.ok || head.stdout.trim() !== baseSha) return false;
+  // --no-renames, so a file moved out of .factory/ shows as added where it landed. A failed status
+  // counts as changed.
+  const status = git(['status', '--porcelain', '--untracked-files=all', '--no-renames']);
+  return status.ok && status.stdout.split('\n').filter(Boolean).every(line => line.slice(3).startsWith('.factory/'));
 }
 
 export function createStopDependencies(env) {
