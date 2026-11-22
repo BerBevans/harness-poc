@@ -17,6 +17,12 @@ inputs:
   claude-code-oauth-token:
     description: Token from claude setup-token, so usage stays within the subscription.
     required: true
+  base-sha:
+    description: >
+      The full SHA of the trusted commit the run starts from: the default branch for an issue, never
+      a PR's merge commit. The Stop hook reads the SDK image pin from it and skips its checks when the
+      worktree hasn't moved from it.
+    required: true
   issue:
     description: >
       The issue the agent is working on. Set as FACTORY_ISSUE, so a hook that blocks the agent tells
@@ -71,6 +77,7 @@ runs:
         AGENT_OTEL_HEADERS: ${{ inputs.otel-headers }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         FACTORY_ISSUE: ${{ inputs.issue }}
+        FACTORY_BASE_SHA: ${{ inputs.base-sha }}
       run: |
         harness="$(cd "$GITHUB_ACTION_PATH/../.." && pwd)"
         transcript="$RUNNER_TEMP/agent/transcript.jsonl"

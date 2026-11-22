@@ -1,5 +1,5 @@
 {
-  "description": "Factory guardrails. The guard fails closed; formatting and the Stop hook fail open because CI is their backstop.",
+  "description": "Factory guardrails. The guard fails closed; formatting and the Stop hook fail open because CI is their backstop. In factory runs dotnet runs only in the build container.",
   "hooks": {
     "PreToolUse": [
       {

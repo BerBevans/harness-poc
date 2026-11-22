@@ -21,12 +21,14 @@
 // Usage: node run-agent.mjs <tool folder> <transcript file>
 // Environment: AGENT_PROMPT, PLUGIN_DIR, AGENT_MAX_TURNS, AGENT_ALLOWED_TOOLS (one rule per line),
 // optional AGENT_MODEL, AGENT_ROLE, AGENT_OTEL_ENDPOINT and AGENT_OTEL_HEADERS, plus
-// CLAUDE_CODE_OAUTH_TOKEN and FACTORY_ISSUE, which pass through.
+// CLAUDE_CODE_OAUTH_TOKEN, FACTORY_ISSUE and FACTORY_BASE_SHA (required), which pass through. The run
+// sets FACTORY_DOTNET=container, so the hooks build and test only in the container.
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { COMMIT_SHA } from './dotnet.mjs';
 import { runIfMain } from './lib/pull-request.mjs';
 
 export const CLAUDE_CODE_VERSION = '2.1.310';
@@ -38,6 +40,18 @@ export const RUNNER_FILE_COMMANDS = ['GITHUB_ENV', 'GITHUB_PATH', 'GITHUB_OUTPUT
 
 export const withoutRunnerFileCommands = env =>
   Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
+
+/**
+ * The environment the agent (and so its hooks) runs with: without the runner's file commands, and
+ * with FACTORY_DOTNET=container set last, so a caller can't switch it off. Throws without a full
+ * FACTORY_BASE_SHA, which the hooks need to pin the build image.
+ */
+export function agentEnvironment(env) {
+  if (!COMMIT_SHA.test(env.FACTORY_BASE_SHA ?? '')) {
+    throw new Error('FACTORY_BASE_SHA must be the full SHA of the trusted commit the run starts from, so the hooks can pin the build image.');
+  }
+  return withoutRunnerFileCommands({ ...env, FACTORY_DOTNET: 'container' });
+}
 
 /** Installs the pinned Claude Code into `toolDir`, unless it's there already. Returns the command to run. */
 export function installClaudeCode(toolDir, runNpm = args => spawnSync('npm', args, { encoding: 'utf8' })) {
@@ -299,7 +313,7 @@ await runIfMain(import.meta.url, async env => {
     allowedTools: parseAllowedTools(env.AGENT_ALLOWED_TOOLS),
     deny: deniedTools({ runnerTemp: env.RUNNER_TEMP, pluginDir: env.PLUGIN_DIR }),
   });
-  const telemetry = telemetryEnvironment(withoutRunnerFileCommands(env));
+  const telemetry = telemetryEnvironment(agentEnvironment(env));
   fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
   const result = await runAgent({ command, args, pluginDir: env.PLUGIN_DIR, transcriptFile, env: telemetry.env });
   return { ...result, lines: [telemetry.summary, ...result.lines] };

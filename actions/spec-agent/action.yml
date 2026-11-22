@@ -70,6 +70,8 @@ runs:
           Edit(./.factory/run/**)
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude-code-oauth-token }}
         FACTORY_ISSUE: ${{ steps.trigger.outputs.issue }}
+        # The checkout above has no ref, so it is this commit.
+        FACTORY_BASE_SHA: ${{ github.sha }}
       run: |
         plugin="$(cd "$GITHUB_ACTION_PATH/../../plugins/factory-harness" && pwd)"
         AGENT_PROMPT="$(cat "$plugin/prompts/spec-agent.md")" PLUGIN_DIR="$plugin" \
