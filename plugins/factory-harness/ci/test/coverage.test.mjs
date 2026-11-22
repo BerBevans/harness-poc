@@ -193,7 +193,7 @@ const approval = { id: 1, user: { login: 'owner', id: 1001 }, state: 'APPROVED',
 
 // Runs `coverage.mjs compare` as the action does, against a local server standing in for the
 // GitHub API, which serves the PR's issue events.
-async function runCompare(t, { current, baseline, events = [], reviews = [approval], overrideUserIds = '1001' }) {
+async function runCompare(t, { current, baseline, events = [], reviews = [approval], overrideUserIds = '1001', author = { id: 2002 } }) {
   const server = http.createServer((request, response) => {
     response.setHeader('Content-Type', 'application/json');
     const items = request.url.includes('/reviews') ? reviews : events;
@@ -211,7 +211,7 @@ async function runCompare(t, { current, baseline, events = [], reviews = [approv
       GITHUB_API_URL: `http://127.0.0.1:${server.address().port}`,
       GITHUB_REPOSITORY: 'o/r',
       GITHUB_TOKEN: 't',
-      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7, head: { sha: HEAD } } }),
+      GITHUB_EVENT_PATH: write('event.json', { pull_request: { number: 7, user: author, head: { sha: HEAD } } }),
       OVERRIDE_USER_IDS: overrideUserIds,
     },
   });
@@ -233,6 +233,9 @@ test('a drop passes with the owner\'s coverage-override label, and fails without
   const unapproved = await runCompare(t, { ...drop, events: [labeled('owner', 1001)], reviews: [] });
   assert.notEqual(unapproved.status, 0);
   assert.match(unapproved.output, /doesn't approve this commit \(eeeeeee\)/);
+
+  const own = await runCompare(t, { ...drop, events: [labeled('owner', 1001)], reviews: [], author: { id: 1001 } });
+  assert.equal(own.status, 0, own.output);
 
   const agent = await runCompare(t, { ...drop, events: [labeled('factory-agent[bot]', 2002)] });
   assert.equal(agent.status, 1, agent.output);

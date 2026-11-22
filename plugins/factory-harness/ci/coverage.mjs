@@ -225,7 +225,7 @@ await runIfMain(import.meta.url, async env => {
     if (result.passed) return result;
     const { pull_request: pr } = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
     const api = { apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number: pr.number, token: env.GITHUB_TOKEN };
-    return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: pr.head.sha });
+    return applyOverride(result, { label: OVERRIDE_LABEL, allowedUserIds, api, headSha: pr.head.sha, authorId: pr.user?.id });
   }
   throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file> | find-baseline | compare <figure> <baseline>');
 });

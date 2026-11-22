@@ -42,6 +42,14 @@ test('an approval counts only on the head commit, and only while it is the lates
   assert.equal(approves([], OWNER.id, HEAD), false);
 });
 
+test('a dismissed approval no longer counts, and equal submission times fall back to review ids', () => {
+  const approval = review('APPROVED');
+  assert.equal(approves([{ ...approval, state: 'DISMISSED' }], OWNER.id, HEAD), false);
+  const at = '2026-10-20T10:00:00Z';
+  assert.equal(approves([{ ...review('CHANGES_REQUESTED'), submitted_at: at }, { ...review('APPROVED'), submitted_at: at }], OWNER.id, HEAD), true);
+  assert.equal(approves([{ ...review('APPROVED'), submitted_at: at }, { ...review('CHANGES_REQUESTED'), submitted_at: at }], OWNER.id, HEAD), false);
+});
+
 test('a comment after an approval leaves it standing, and someone else\'s approval is not the owner\'s', () => {
   assert.equal(approves([review('APPROVED'), review('COMMENTED')], OWNER.id, HEAD), true);
   assert.equal(approves([review('APPROVED', HEAD, AGENT)], OWNER.id, HEAD), false);
@@ -129,6 +137,19 @@ test('applyOverride: the owner approves the head and labels it; an approval of a
   assert.equal((await run([review('APPROVED')])).passed, true);
   assert.equal((await run([review('APPROVED', OLD)])).passed, false);
   assert.equal((await run([review('APPROVED')], OLD)).passed, false);
+});
+
+test('applyOverride: on the owner\'s own PR, which GitHub won\'t let them approve, their label counts without a review', async () => {
+  const run = (applier, authorId) => {
+    const api = fakeEventsApi([event('labeled', applier)]);
+    return applyOverride(failing, { label: LABEL, allowedUserIds: [1001], api: fetchArgs(api.fetchImpl), headSha: HEAD, authorId })
+      .then(result => ({ result, urls: api.urls }));
+  };
+  const own = await run(OWNER, OWNER.id);
+  assert.equal(own.result.passed, true);
+  assert.equal(own.urls.some(url => url.includes('/reviews')), false);
+  assert.equal((await run(OWNER, AGENT.id)).result.passed, false);
+  assert.equal((await run(AGENT, AGENT.id)).result.passed, false);
 });
 
 test('applyOverride: an agent\'s label fails even with the owner\'s approval, and a passing result reads nothing', async () => {

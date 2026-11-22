@@ -7,6 +7,10 @@
 // so a push after the approval leaves it on an older commit. Timestamps can't do this. An agent can
 // push X, force-push back to A, wait for the owner to approve A, then fast-forward to X: X's first
 // run, and every force-push event, came before the approval.
+//
+// GitHub doesn't let anyone approve their own PR, so on a PR the owner opened, the owner's label
+// counts without a review. That's safe because the factory-apps-own-branches ruleset keeps the Apps
+// off the owner's branches: every commit there is the owner's own.
 
 import { getJson } from './pull-request.mjs';
 
@@ -92,11 +96,13 @@ export function overridden(result, { label, appliedBy, allowedUserIds, approved,
 
 /**
  * Applies the PR's override label to a failing result: reads who applied it and their reviews,
- * then decides as `overridden` does. `api` is { apiUrl, repository, number, token, fetchImpl }.
+ * then decides as `overridden` does. `api` is { apiUrl, repository, number, token, fetchImpl };
+ * `authorId` is the user who opened the PR.
  */
-export async function applyOverride(result, { label, allowedUserIds, api, headSha }) {
+export async function applyOverride(result, { label, allowedUserIds, api, headSha, authorId }) {
   if (result.passed) return result;
   const appliedBy = labelAppliedBy(await fetchIssueEvents(api), label);
-  const approved = appliedBy !== null && approves(await fetchReviews(api), appliedBy.id, headSha);
+  const allowed = appliedBy !== null && allowedUserIds.includes(appliedBy.id);
+  const approved = allowed && (appliedBy.id === authorId || approves(await fetchReviews(api), appliedBy.id, headSha));
   return overridden(result, { label, appliedBy, allowedUserIds, approved, headSha });
 }
