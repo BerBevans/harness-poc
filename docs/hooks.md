@@ -79,6 +79,13 @@ jobs:
         with:
           exempt-user-ids: <your user ID>
           override-user-ids: <your user ID>
+  reset-overrides:
+    name: Reset override labels
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: <owner>/harness-poc/actions/reset-overrides@v0.14.3
 ```
 
 - **The guardrail path check** fails any PR that adds, changes, deletes or renames a guardrail file, unless the author is exempt. It uses the same `isGuardrailPath` as the hook rule. It also fails any PR, from anyone, that commits a Claude Code `settings.local.json` or a file under the root `.factory/` folder (the implementer's progress note and run outputs). Deleting either kind, or renaming a factory file out of the folder, passes, so a leak or a paused run can be cleaned up. A draft PR may hold the progress note; it just can't merge.
@@ -86,6 +93,9 @@ jobs:
 - **The PR size check** fails a PR that changes more than 300 lines, added plus removed, and warns above 250. Blank lines don't count, and within each hunk a removed and an added line that match once whitespace is stripped cancel out, so reindenting is free. It leaves out `packages.lock.json` and EF Core's `Migrations/*.Designer.cs` and `*ModelSnapshot.cs`, and counts everything else, with one exception: on a `factory/issue-<N>` branch in the repo itself, it leaves out `docs/specs/<N>-<slug>.md` while it is a new file that matches issue N's current spec (the body above the original request, line endings and trailing whitespace aside). It reads the copy from the diff, since a new file's patch holds all of it. A copy that differs, or that already exists on the target branch, counts in full. It fails closed if GitHub leaves out the diff for a text file. The `size-override` label lets an oversized PR pass, but only when someone in `override-user-ids` applied it.
 - **All three must run on `pull_request_target`.** On `pull_request` the workflow comes from the PR branch, so a PR could remove a check from its own run. Each action refuses any other event.
 - **Exempt user IDs, not logins,** because a login can be renamed and then taken. Find an ID with `gh api users/<login> --jq .id`. Dependabot is always exempt.
+- **An exemption needs both the PR's opener and the sender of the event** (whoever pushed, labelled or reopened) to be exempt. An agent pushing to the owner's or Dependabot's PR is held to the rules. The check can't see who made earlier pushes, so the ruleset below is what stops them.
+- **An override label approves the diff it was applied to.** On a push, every check ignores override labels, and `reset-overrides` removes them, so the owner reviews the new diff and applies the label again. The `reset-overrides` job is required, not optional: the checks ignore labels only on the push itself, so without it a stale label would count again on the next event, such as an unrelated label or a reopen. An App labelling the owner's PR also makes the sender non-exempt, so the checks go red until the owner sends another event; that fails safe.
+- **Keep the factory Apps on their own branches** with a branch ruleset: target all branches except `main` and `factory/**`, restrict creations, updates and deletions, and add the repo admin role and Dependabot as bypass actors (always). The Apps can then push only to `factory/**`, never to the owner's or Dependabot's branches. `main` is covered by its own rulesets.
 - **Make `Guardrail paths`, `Suppression scan`, `PR size`, `Build` and `Mutation testing` required checks** in the repo's ruleset.
 - **Copy `templates/CODEOWNERS.example` to `.github/CODEOWNERS`** and replace `@harness-owner`. Then add a second ruleset on the default branch: require a pull request with review from code owners, and add the owner as a bypass actor for pull requests only. Keep it separate from the status-check ruleset, which has no bypass.
 

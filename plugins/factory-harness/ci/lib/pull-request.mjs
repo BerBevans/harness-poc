@@ -73,7 +73,8 @@ export async function runOnPullRequest({
       'On pull_request, a PR could change the workflow that runs the check.');
   }
   const exemptUserIds = parseUserIds(env.EXEMPT_USER_IDS);
-  const pr = readEvent(env.GITHUB_EVENT_PATH).pull_request;
+  const event = readEvent(env.GITHUB_EVENT_PATH);
+  const pr = event.pull_request;
   const files = await fetchChangedFiles({
     apiUrl: env.GITHUB_API_URL,
     repository: env.GITHUB_REPOSITORY,
@@ -82,8 +83,19 @@ export async function runOnPullRequest({
     fetchImpl,
   });
   return evaluate({
-    author: pr.user, number: pr.number, head: pr.head, files, changedFileCount: pr.changed_files, exemptUserIds,
+    author: checkedAuthor(pr.user, event.sender, exemptUserIds),
+    number: pr.number, head: pr.head, files, changedFileCount: pr.changed_files, exemptUserIds, action: event.action,
   });
+}
+
+/**
+ * Whose exemption counts: the PR's opener, unless someone who isn't exempt sent this event (pushed
+ * to the branch, say). Then the check holds them to the rules, so pushing to the owner's or
+ * Dependabot's PR doesn't skip it. A missing sender counts as not exempt.
+ */
+export function checkedAuthor(opener, sender, exemptUserIds) {
+  if (!isExempt(opener, exemptUserIds) || (sender && isExempt(sender, exemptUserIds))) return opener;
+  return sender ?? { login: 'an unknown sender', id: null, type: 'User' };
 }
 
 /** Formats a GitHub Actions error annotation, so it shows against the file (and line) in the PR. */

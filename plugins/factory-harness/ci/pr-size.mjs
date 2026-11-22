@@ -155,7 +155,7 @@ export async function run({ env, fetchImpl, ...options }) {
     env,
     fetchImpl,
     ...options,
-    evaluate: async ({ number, head, ...pullRequest }) => {
+    evaluate: async ({ number, head, action, ...pullRequest }) => {
       const specCopies = isExempt(pullRequest.author, pullRequest.exemptUserIds)
         ? [] : await findSpecCopies({ head, files: pullRequest.files, env, fetchImpl });
       const result = evaluate({ ...pullRequest, specCopies });
@@ -163,7 +163,7 @@ export async function run({ env, fetchImpl, ...options }) {
       const events = await fetchIssueEvents({
         apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number, token: env.GITHUB_TOKEN, fetchImpl,
       });
-      return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds });
+      return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds, eventAction: action });
     },
   });
 }

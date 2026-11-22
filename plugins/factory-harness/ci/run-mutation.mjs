@@ -96,7 +96,8 @@ await runIfMain(import.meta.url, async env => {
     throw new Error(`The mutation check runs the PR's code, so it must run on pull_request, not ${env.GITHUB_EVENT_NAME}.`);
   }
   const allowedUserIds = parseUserIds(env.OVERRIDE_USER_IDS, 'OVERRIDE_USER_IDS');
-  const pr = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).pull_request;
+  const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
+  const pr = event.pull_request;
   const api = { apiUrl: env.GITHUB_API_URL, repository: env.GITHUB_REPOSITORY, number: pr.number, token: env.GITHUB_TOKEN };
   const changedFiles = await fetchChangedFiles(api);
   const incomplete = incompleteListing(changedFiles, pr.changed_files);
@@ -109,5 +110,5 @@ await runIfMain(import.meta.url, async env => {
   });
   if (result.passed || !overridable) return result;
   const appliedBy = labelAppliedBy(await fetchIssueEvents(api), OVERRIDE_LABEL);
-  return overridden(result, { label: OVERRIDE_LABEL, appliedBy, allowedUserIds });
+  return overridden(result, { label: OVERRIDE_LABEL, appliedBy, allowedUserIds, eventAction: event.action });
 });

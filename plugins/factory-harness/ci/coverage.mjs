@@ -223,13 +223,14 @@ await runIfMain(import.meta.url, async env => {
     const allowedUserIds = parseUserIds(env.OVERRIDE_USER_IDS, 'OVERRIDE_USER_IDS');
     const result = compare({ current: readFigure(args[0]), baseline: readFigure(args[1]) });
     if (result.passed) return result;
+    const event = JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8'));
     const events = await fetchIssueEvents({
       apiUrl: env.GITHUB_API_URL,
       repository: env.GITHUB_REPOSITORY,
-      number: JSON.parse(fs.readFileSync(env.GITHUB_EVENT_PATH, 'utf8')).pull_request.number,
+      number: event.pull_request.number,
       token: env.GITHUB_TOKEN,
     });
-    return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds });
+    return overridden(result, { label: OVERRIDE_LABEL, appliedBy: labelAppliedBy(events, OVERRIDE_LABEL), allowedUserIds, eventAction: event.action });
   }
   throw new Error('Usage: coverage.mjs measure <report folder> <results folder> <figure file> | find-baseline | compare <figure> <baseline>');
 });
