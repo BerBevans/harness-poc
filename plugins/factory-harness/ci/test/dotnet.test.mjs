@@ -57,10 +57,11 @@ test('the container gets no host environment, a read-only .git and the caller\'s
   assert.match(joined, /--user 1001:118 /);
   assert.match(joined, /-v \/repo:\/src -v \/repo\/\.git:\/src\/\.git:ro /);
   assert.match(joined, /--cap-drop ALL --security-opt no-new-privileges /);
+  assert.match(joined, / --read-only --tmpfs \/tmp:exec,size=4g /);
   assert.deepEqual(args.slice(-4), ['--entrypoint', 'dotnet', 'img', 'build']);
   assert.ok(!args.some(arg => /^--(env-file|pid|privileged|network|ipc|uts)(=|$)|docker\.sock/.test(arg)));
   const passed = args.flatMap((arg, i) => (arg === '-e' ? [args[i + 1].split('=')[0]] : []));
-  assert.deepEqual(passed, ['HOME', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_NOLOGO', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE', 'NUGET_PACKAGES']);
+  assert.deepEqual(passed, ['HOME', 'DOTNET_CLI_HOME', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_NOLOGO', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE', 'NUGET_PACKAGES']);
 });
 
 // In CI a missing Docker must fail the isolation test, never skip it, or the proof silently goes away.
@@ -93,16 +94,18 @@ test('code in the container can\'t see the host environment or write to .git', t
     'ls -d /proc/[0-9]* | wc -l > /src/processes.txt',
     'id -u > /src/uid.txt',
     'if touch /src/.git/planted 2>/dev/null; then echo writable; else echo read-only; fi > /src/git.txt',
+    'if touch /planted 2>/dev/null; then echo writable; else echo read-only; fi > /src/root.txt',
   ].join('; ');
   const result = runInContainer({ image: BUSYBOX, repo, entrypoint: 'sh', args: ['-c', script] });
   assert.equal(result.passed, true, result.lines.join('\n'));
 
   const read = name => fs.readFileSync(path.join(repo, name), 'utf8');
   assert.ok(!read('env.txt').includes(canary) && !read('proc.txt').includes(canary), 'the host canary reached the container');
-  assert.match(read('env.txt'), /^HOME=\/tmp\/home$/m, 'positive control: a value the wrapper passes must be visible');
+  assert.match(read('env.txt'), /^HOME=\/tmp$/m, 'positive control: a value the wrapper passes must be visible');
   assert.ok(Number(read('processes.txt')) < 10, 'host processes are visible');
   assert.equal(read('uid.txt').trim(), String(process.getuid()));
   assert.equal(fs.statSync(path.join(repo, 'uid.txt')).uid, process.getuid(), 'files the container writes must belong to the caller');
   assert.equal(read('git.txt').trim(), 'read-only');
+  assert.equal(read('root.txt').trim(), 'read-only', 'the image itself must not be writable');
   assert.ok(!fs.existsSync(path.join(repo, '.git', 'planted')));
 });

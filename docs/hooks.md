@@ -215,11 +215,11 @@ Compiled code gets past the text fence: an MSBuild target, an analyser or a test
 
 - **Only `build` and `test`,** with an optional project path and, for `test`, `--filter`. Anything else is refused: `-p:` properties, `--settings` and `--logger` can change what runs or weaken a check.
 - **The image is the product `Dockerfile`'s `build` stage,** which must be `FROM <registry>/dotnet/sdk:<tag>@sha256:<digest> AS build` with a tag that starts with the `global.json` version. Dockerfiles are guardrail files, and Dependabot's `sdk-and-images` group bumps the image and `global.json` together. With `CI` set, both files are read from `FACTORY_BASE_SHA` with `git cat-file`, never from the worktree, and the wrapper refuses to run without it. Pin the multi-arch index digest, so the same pin runs on arm64 and x86_64.
-- **No host environment:** the container gets only `HOME`, the `DOTNET_` opt-outs and `NUGET_PACKAGES`. It has its own `/proc`, so no host process is visible.
+- **No host environment:** the container gets only `HOME` and `DOTNET_CLI_HOME` (both `/tmp`, since the caller's uid has no home in the image), the `DOTNET_` opt-outs and `NUGET_PACKAGES`. It has its own `/proc`, so no host process is visible.
 - **`.git` is mounted read-only,** so code can't plant a hook or config that host-side git runs later with a token. The rest of the repo is writable, so build output lands.
-- **It runs as the caller's user and group,** so files it writes aren't owned by root, with every capability dropped, `no-new-privileges` and a process limit. The network stays on for restore.
+- **It runs as the caller's user and group,** so files it writes aren't owned by root, with every capability dropped, `no-new-privileges`, a process limit and a read-only root filesystem with a tmpfs `/tmp`. Restore therefore downloads packages on every run: there is no NuGet cache shared between runs, so one run can't poison the next. The network stays on for restore.
 
-`ci/test/dotnet.test.mjs` proves it on a small pinned image through the wrapper's own code path: a canary in the host environment is missing from the container's environment and from every `/proc/*/environ`, a value the wrapper passes is present, only the container's processes are visible, files belong to the caller and a write to `.git` fails. Without Docker the test is skipped locally and fails in CI.
+`ci/test/dotnet.test.mjs` proves it on a small pinned image through the wrapper's own code path: a canary in the host environment is missing from the container's environment and from every `/proc/*/environ`, a value the wrapper passes is present, only the container's processes are visible, files belong to the caller and writes to `.git` and to the image fail. A real `dotnet build` and `dotnet test` of the product passed through the wrapper on arm64 on 2026-11-22, read-only root included. Without Docker the test is skipped locally and fails in CI.
 
 ## The spec agent
 

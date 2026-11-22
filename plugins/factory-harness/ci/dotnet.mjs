@@ -17,7 +17,7 @@ import path from 'node:path';
 import { runIfMain } from './lib/pull-request.mjs';
 
 const USAGE = 'Usage: dotnet.mjs build|test [project] [--filter <expression>]';
-const HOME = '/tmp/home';
+const HOME = '/tmp';
 
 /** The request from the command line. Anything but a command, one project and a test filter is refused. */
 export function parseRequest(argv) {
@@ -80,7 +80,9 @@ export function dockerArguments({ image, repo, uid, gid, entrypoint = 'dotnet', 
     '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges',
     '--pids-limit', '1024',
+    '--read-only', '--tmpfs', '/tmp:exec,size=4g',
     '-e', `HOME=${HOME}`,
+    '-e', `DOTNET_CLI_HOME=${HOME}`,
     '-e', 'DOTNET_CLI_TELEMETRY_OPTOUT=1',
     '-e', 'DOTNET_NOLOGO=1',
     '-e', 'DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1',
