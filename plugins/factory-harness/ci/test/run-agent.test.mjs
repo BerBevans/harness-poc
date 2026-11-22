@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment,
+  CLAUDE_CODE_VERSION, CONTENT_SWITCHES, TELEMETRY_SWITCHES, agentArguments, decodeHeaders, deniedTools, initProblem, installClaudeCode, parseAllowedTools, parseMaxTurns, resourceAttributes, runAgent, telemetryEnvironment, RUNNER_FILE_COMMANDS, withoutRunnerFileCommands,
 } from '../run-agent.mjs';
 
 const pluginDir = path.resolve('/h/plugins/factory-harness');
@@ -55,10 +55,21 @@ test('allow rules are read one per line, so a command rule keeps its spaces', ()
 });
 
 test('an allow rule that grants a file tool or Bash everywhere is rejected', () => {
-  for (const rule of ['Read', 'Bash', 'Write', 'Grep', 'Glob', 'Edit', 'Read(*)', 'Edit(**)', 'Read(//**)', 'Read(~/**)', 'Bash( * )']) {
+  for (const rule of ['Read', 'Bash', 'Write', 'Grep', 'Glob', 'Edit', 'Read(*)', 'Edit(**)', 'Read(//**)', 'Read(~/**)', 'Bash( * )',
+    'Bash(:*)', 'Bash()', 'Read(**/*)', 'Read(/**/*)', 'Read(//**/*)', 'Read(/*/**)', 'Read(~)']) {
     assert.throws(() => parseAllowedTools(`Read(./**)\n${rule}`), /allows the tool everywhere/, rule);
   }
   assert.throws(() => parseAllowedTools(' \n'), /AGENT_ALLOWED_TOOLS is empty/);
+});
+
+test('rules that name a path or command are accepted', () => {
+  const rules = ['Read(./**)', 'Edit(./.factory/run/**)', 'Bash(git status:*)', 'Bash(dotnet test *)', 'WebSearch'];
+  assert.deepEqual(parseAllowedTools(rules.join('\n')), rules);
+});
+
+test('the runner\'s file commands are kept from the agent, and everything else passes', () => {
+  const env = Object.fromEntries([...RUNNER_FILE_COMMANDS, 'GITHUB_REPOSITORY', 'RUNNER_TEMP'].map(name => [name, 'x']));
+  assert.deepEqual(withoutRunnerFileCommands(env), { GITHUB_REPOSITORY: 'x', RUNNER_TEMP: 'x' });
 });
 
 test('the turn cap must be a positive whole number', () => {

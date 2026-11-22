@@ -18,6 +18,7 @@ export const OUTCOMES = ['questions', 'complete', 'split'];
 const AGENT_FILES = ['input.md', 'spec.md', 'comment.md', 'outcome.json'];
 const MAX_SPEC = 50000;
 const MAX_COMMENT = 4000;
+const MAX_ISSUE_BODY = 65536;
 // The PR size target. A spec estimated above it can't be complete: it must be split instead.
 export const MAX_COMPLETE_LINES = 250;
 
@@ -71,7 +72,8 @@ export function knownSecrets(raw) {
 export function readOutputs(dir, secretValues) {
   const present = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
   const extra = present.filter(name => !AGENT_FILES.includes(name));
-  if (extra.length > 0) return { problem: `it wrote files it shouldn't have (${extra.join(', ')})` };
+  // Problems never quote what the agent wrote: they're posted without the secret scan.
+  if (extra.length > 0) return { problem: `it wrote ${extra.length} file${extra.length === 1 ? '' : 's'} it shouldn't have` };
   const missing = AGENT_FILES.slice(1).filter(name => !present.includes(name));
   if (missing.length > 0) return { problem: `it didn't write ${missing.join(', ')}` };
 
@@ -82,7 +84,7 @@ export function readOutputs(dir, secretValues) {
   } catch {
     return { problem: 'outcome.json isn\'t valid JSON' };
   }
-  if (!OUTCOMES.includes(parsed?.outcome)) return { problem: `the outcome "${parsed?.outcome}" isn't one of ${OUTCOMES.join(', ')}` };
+  if (!OUTCOMES.includes(parsed?.outcome)) return { problem: `the outcome isn't one of ${OUTCOMES.join(', ')}` };
   if (!Number.isInteger(parsed.estimatedLines) || parsed.estimatedLines < 0) return { problem: 'the size estimate isn\'t a whole number' };
   if (parsed.outcome === 'complete' && parsed.estimatedLines > MAX_COMPLETE_LINES) {
     return { problem: `it marked the spec complete at about ${parsed.estimatedLines} lines, over the ${MAX_COMPLETE_LINES}-line target, so the outcome must be split` };
@@ -139,7 +141,13 @@ export async function run({ dir, env, fetchImpl = fetch }) {
   }
 
   const issue = await getJson(issueUrl, env.GITHUB_TOKEN, fetchImpl);
-  await send('PATCH', issueUrl, env.GITHUB_TOKEN, { body: composeBody(result.spec, issue.body) }, fetchImpl);
+  const body = composeBody(result.spec, issue.body);
+  if (body.length > MAX_ISSUE_BODY) {
+    const problem = `the spec and the original request together are over GitHub's ${MAX_ISSUE_BODY}-character limit for an issue body`;
+    await send('POST', `${issueUrl}/comments`, env.GITHUB_TOKEN, { body: failureComment(problem) }, fetchImpl);
+    return { passed: false, lines: [`::error::Nothing posted but a failure comment: ${problem}.`] };
+  }
+  await send('PATCH', issueUrl, env.GITHUB_TOKEN, { body }, fetchImpl);
   await send('POST', `${issueUrl}/comments`, env.GITHUB_TOKEN, { body: result.comment }, fetchImpl);
   return { passed: true, lines: [`Posted the spec and a comment: ${result.outcome}, about ${result.estimatedLines} lines.`] };
 }
