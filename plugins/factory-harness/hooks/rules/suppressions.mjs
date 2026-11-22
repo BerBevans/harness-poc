@@ -1,8 +1,11 @@
 // Blocks new suppressions: in C# code, and as weakening properties in project files.
-// It compares added text with removed text, so moving existing code doesn't trip it.
-// CI's diff scan imports findNewSuppressions to apply the same rules to a PR.
+// It compares the lines each rule matches in the added text with those in the removed text, so
+// moving an existing line doesn't trip it, but widening one (`disable X` to `disable X, Y`) or
+// swapping one suppression for another does. CI's diff scan uses the same rules.
+//
+// Generated-looking names (*.g.cs, *.Designer.cs) are scanned too: the agent picks the name and the
+// compiler builds the file. Committed build output under obj/ is a guardrail path instead.
 
-import { isGeneratedCode } from '../lib/paths.mjs';
 import { commandWriteTargets } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
@@ -17,15 +20,22 @@ const COVERAGE_EXCLUSIONS = [
 export const CODE_SUPPRESSIONS = [
   { name: '#pragma warning disable', pattern: /#\s*pragma\s+warning\s+disable\b/gi },
   { name: '#nullable disable', pattern: /#\s*nullable\s+disable\b/gi },
-  { name: '[SuppressMessage]', pattern: /(?<!\w)SuppressMessage(Attribute)?\s*\(/g },
-  { name: '[UnconditionalSuppressMessage]', pattern: /\bUnconditionalSuppressMessage(Attribute)?\s*\(/g },
+  // Bare names with word boundaries, so an alias (`using Q = ...SuppressMessageAttribute;`), a
+  // qualified name or a named property is caught too.
+  { name: '[SuppressMessage]', pattern: /\bSuppressMessage(Attribute)?\b/g },
+  { name: '[UnconditionalSuppressMessage]', pattern: /\bUnconditionalSuppressMessage(Attribute)?\b/g },
+  // Analysers treat code marked generated as generated, and skip it.
+  { name: '[GeneratedCode]', pattern: /\bGeneratedCode(Attribute)?\b/g },
+  { name: '[CompilerGenerated]', pattern: /\bCompilerGenerated(Attribute)?\b/g },
   { name: 'Stryker disable comment', pattern: /stryker\s+disable\b/gi },
   { name: 'skipped test (Skip =)', pattern: /\bSkip\s*=/g },
   { name: 'explicit-only test (Explicit = true)', pattern: /\bExplicit\s*=\s*true\b/g },
   { name: 'Assert.Skip', pattern: /\bAssert\.Skip(When|Unless)?\s*\(/g },
   { name: 'Skip.If / Skip.When', pattern: /\bSkip\.(If|IfNot|When|Unless)\s*\(/g },
-  { name: '[Ignore]', pattern: /[[,]\s*Ignore(Attribute)?\s*[\](,]/g },
-  { name: '[Explicit]', pattern: /[[,]\s*Explicit(Attribute)?\s*[\](,]/g },
+  // In attribute position only (after [ or a comma, maybe qualified, or opening a line), or as the
+  // full attribute name in an alias, so EF Core's builder.Ignore(...) isn't caught.
+  { name: '[Ignore]', pattern: /[[,]\s*(?:[\w.]+\.)?Ignore(Attribute)?\b|^Ignore(Attribute)?\b|\bIgnoreAttribute\b|\bIgnore\s*=/g },
+  { name: '[Explicit]', pattern: /[[,]\s*(?:[\w.]+\.)?Explicit(Attribute)?\b|^Explicit(Attribute)?\b|\bExplicitAttribute\b/g },
   ...COVERAGE_EXCLUSIONS,
 ];
 
@@ -47,7 +57,18 @@ export const PROJECT_FILE_SUPPRESSIONS = [
   // Lets a project override properties set on the command line, such as the hook-up of the build
   // settings targets.
   { name: 'TreatAsLocalProperty', pattern: /\bTreatAsLocalProperty\s*=/gi },
+  // SDK projects compile every .cs file already. An explicit Compile item can add a file that isn't
+  // .cs (so the scan never reads it as code) or remove code from the build.
+  { name: 'Compile item', pattern: /<\s*Compile\b/gi },
 ];
+
+// Removing a restore widens a suppression to the end of the file, so a restore that disappears counts.
+const RESTORE = { name: 'removed #pragma warning restore', pattern: /#\s*pragma\s+warning\s+restore\b/gi };
+
+// The one suppression a generated file may hold: EF Core writes it into every migration designer
+// file and model snapshot. Only that exact line, only in those files.
+const EF_MIGRATION_FILE = /(^|\/)migrations\/.*(\.designer\.cs|modelsnapshot\.cs)$/;
+const EF_PRAGMA = '#pragma warning disable 612, 618';
 
 const COVERAGE_EXCLUSION_NAMES = new Set(COVERAGE_EXCLUSIONS.map(rule => rule.name));
 const BUILD_SETTING_NAMES = new Set(PROJECT_FILE_SUPPRESSIONS.map(rule => rule.name));
@@ -74,7 +95,8 @@ export function blockMessage(found, nextStep) {
   return `${reasons.join(' ')} If you believe it is needed, don't add it. ${nextStep}`;
 }
 
-const isCodeFile = path => path.endsWith('.cs') && !isGeneratedCode(path);
+// Razor sources compile to C# in the same assembly.
+const isCodeFile = path => /\.(cs|razor|cshtml)$/.test(path);
 const isProjectFile = path => /\.(csproj|props|targets)$/.test(path);
 
 /** The suppression rules that apply to a file: code rules, project-file rules, or none. */
@@ -83,13 +105,40 @@ export const suppressionRulesFor = normalisedPath =>
     : isProjectFile(normalisedPath) ? PROJECT_FILE_SUPPRESSIONS
       : [];
 
-const count = (text, pattern) => (text.match(pattern) ?? []).length;
+export const normaliseLine = line => line.trim().replace(/\s+/g, ' ');
 
-/** Names of suppressions that appear more often in the added text than in the removed text. */
+/** Whether a normalised line counts for `rule` in this file. The EF Core pragma doesn't, in migration files. */
+export function lineMatcher(rule, normalisedPath) {
+  const pattern = new RegExp(rule.pattern.source, rule.pattern.flags.replace('g', ''));
+  const efFile = EF_MIGRATION_FILE.test(normalisedPath);
+  return line => pattern.test(line) && !(efFile && line === EF_PRAGMA);
+}
+
+const matchingLines = (text, rule, normalisedPath) =>
+  text.split('\n').map(normaliseLine).filter(lineMatcher(rule, normalisedPath));
+
+/** The items in `from` with no equal line left in `minus`, each paired off once: a multiset difference. */
+export function unmatched(from, minus, lineOf = item => item) {
+  const left = new Map();
+  for (const line of minus) left.set(line, (left.get(line) ?? 0) + 1);
+  return from.filter(item => {
+    const n = left.get(lineOf(item)) ?? 0;
+    if (n > 0) left.set(lineOf(item), n - 1);
+    return n === 0;
+  });
+}
+
+/** The rules a file's change breaks: new or changed suppression lines, or a restore that went. */
 export function findNewSuppressions(normalisedPath, addedText, removedText = '') {
   const rules = suppressionRulesFor(normalisedPath);
-  return rules.filter(r => count(addedText, r.pattern) > count(removedText, r.pattern)).map(r => r.name);
+  const added = rule => matchingLines(addedText, rule, normalisedPath);
+  const removed = rule => matchingLines(removedText, rule, normalisedPath);
+  const found = rules.filter(rule => unmatched(added(rule), removed(rule)).length > 0).map(rule => rule.name);
+  if (rules === CODE_SUPPRESSIONS && unmatched(removed(RESTORE), added(RESTORE)).length > 0) found.push(RESTORE.name);
+  return found;
 }
+
+export { RESTORE };
 
 export function check(change, context) {
   const nextStep = nextStepAfterBlock(context.env);
