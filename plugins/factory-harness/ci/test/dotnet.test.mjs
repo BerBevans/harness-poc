@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { dockerArguments, dotnetArguments, parseRequest, readAtCommit, resolveImage, runInContainer, sdkImage } from '../dotnet.mjs';
+import { dockerArguments, dotnetArguments, parseRequest, readAtCommit, removeLeftoverContainers, resolveImage, runInContainer, sdkImage } from '../dotnet.mjs';
 
 const SHA = 'c'.repeat(40);
 const DIGEST = `sha256:${'a'.repeat(64)}`;
@@ -140,7 +140,17 @@ test('with capture, the output is collected and Docker gets only the environment
   };
   const result = runInContainer({ image: 'img', repo, args: ['build'], run, capture: true, timeout: 5000, env: { PATH: '/bin' } });
   assert.deepEqual(result, { passed: false, lines: ['dotnet exited with 1.'], output: 'Build FAILED.\nerror CS1002' });
-  assert.deepEqual(calls[0].options, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 5000, env: { PATH: '/bin' } });
+  assert.deepEqual(calls[0].options, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 5000, killSignal: 'SIGKILL', env: { PATH: '/bin' } });
   assert.equal(calls[1].args[0], 'rm');
   fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test('leftover factory containers are removed, and nothing is run when there are none', () => {
+  const calls = [];
+  const run = ps => (program, args) => { calls.push(args); return { stdout: args[0] === 'ps' ? ps : '' }; };
+  removeLeftoverContainers({ run: run('abc\ndef\n') });
+  assert.deepEqual(calls, [['ps', '--all', '--quiet', '--filter', 'name=^factory-dotnet-'], ['rm', '--force', 'abc', 'def']]);
+  calls.length = 0;
+  removeLeftoverContainers({ run: run('') });
+  assert.equal(calls.length, 1);
 });

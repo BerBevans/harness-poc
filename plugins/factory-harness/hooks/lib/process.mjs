@@ -35,8 +35,14 @@ export function hashFile(filePath) {
   }
 }
 
-/** The solution file at the repo root (.slnx preferred), or null. */
+/**
+ * The solution file at the repo root, or null. `App.slnx` beats `App.sln`; a solution with any other
+ * name is ambiguous and throws, so an added decoy can't choose what the hooks check.
+ */
 export function findSolution(root) {
-  const names = fs.readdirSync(root).filter(n => /\.slnx?$/i.test(n)).sort((a, b) => b.localeCompare(a));
-  return names[0] ?? null;
+  const names = fs.readdirSync(root).filter(n => /\.slnx?$/i.test(n)).sort();
+  if (new Set(names.map(n => n.replace(/\.slnx?$/i, '').toLowerCase())).size > 1) {
+    throw new Error(`The repo root has more than one solution (${names.join(', ')}), so the hooks can't tell which to check. Keep one solution at the root.`);
+  }
+  return names.find(n => /\.slnx$/i.test(n)) ?? names[0] ?? null;
 }

@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CONTAINER_BUDGET_SECONDS, dotnetRunner } from '../lib/dotnet.mjs';
-import { unchangedFromBase } from '../lib/stop-dependencies.mjs';
+import { splitChecks, unchangedFromBase } from '../lib/stop-dependencies.mjs';
 import { formatBeforeCommit } from '../format-on-commit.mjs';
 import { decideStop } from '../verify-before-stop.mjs';
 
@@ -20,6 +20,27 @@ test('in a factory run, dotnet runs in the container with output captured', () =
   const dotnet = dotnetRunner(ENV, { runContainer, image: () => 'sdk@sha256:x', now: () => 0 });
   assert.deepEqual(dotnet('/repo', ['build', 'App.slnx'], 300), { ok: true, output: 'Build succeeded.' });
   assert.deepEqual({ ...calls[0], env: undefined }, { image: 'sdk@sha256:x', repo: '/repo', args: ['build', 'App.slnx'], capture: true, timeout: 300000, env: undefined });
+});
+
+test('the Stop hook can run several steps in one container through another entrypoint', () => {
+  const { calls, runContainer } = fakeContainer();
+  dotnetRunner(ENV, { runContainer, image: () => 'img', now: () => 0 })('/repo', ['-c', 'script'], 60, { entrypoint: 'bash' });
+  assert.equal(calls[0].entrypoint, 'bash');
+  assert.deepEqual(calls[0].args, ['-c', 'script']);
+});
+
+test('the checks container\'s output splits at its status lines; a step without one failed', () => {
+  const projects = ['A.UnitTests.csproj', 'B.ArchitectureTests.csproj'];
+  assert.deepEqual(splitChecks('built\n@@factory 0\nA passed\n@@factory 0\nB failed\n@@factory 1\n', projects), {
+    build: { ok: true, output: 'built\n' },
+    tests: [{ ok: true, output: '\nA passed\n' }, { ok: false, output: '\nB failed\n' }],
+  });
+  assert.deepEqual(splitChecks('error CS1002\n@@factory 1\n', projects), { build: { ok: false, output: 'error CS1002\n' }, tests: [] });
+  const timedOut = splitChecks('built\n@@factory 0\nA hung', projects);
+  assert.equal(timedOut.tests[0].ok, false);
+  assert.match(timedOut.tests[0].output, /A hung\nThis step didn't finish\./);
+  assert.equal(timedOut.tests[1].ok, false);
+  assert.equal(splitChecks('dotnet ran for over 540 seconds', projects).build.ok, false);
 });
 
 test('Docker gets the session environment without the runner file commands', () => {

@@ -12,6 +12,9 @@ export const inContainer = env => env.FACTORY_DOTNET === 'container';
 // kills the hook (which would skip the clean-up and leave it writing to the worktree).
 export const CONTAINER_BUDGET_SECONDS = 540;
 
+/** Docker needs the session's environment (PATH, DOCKER_HOST), but not the runner's file commands. */
+export const dockerEnvironment = env => Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
+
 /**
  * Returns `(root, args, timeoutSeconds) => { ok, output }`. In a container, every call shares one
  * deadline, and any failure to run (no Docker, no base commit, a bad image pin) is a failed check.
@@ -24,13 +27,12 @@ export function dotnetRunner(env, { now = Date.now, runContainer = runInContaine
     };
   }
   const deadline = now() + CONTAINER_BUDGET_SECONDS * 1000;
-  // Docker needs the session's environment (PATH, DOCKER_HOST), but not the runner's file commands.
-  const dockerEnv = Object.fromEntries(Object.entries(env).filter(([name]) => !RUNNER_FILE_COMMANDS.includes(name)));
-  return (root, args, timeoutSeconds) => {
+  const dockerEnv = dockerEnvironment(env);
+  return (root, args, timeoutSeconds, { entrypoint } = {}) => {
     const timeout = Math.min(timeoutSeconds * 1000, deadline - now());
     if (timeout <= 0) return { ok: false, output: 'The Stop hook ran out of time before this step.' };
     try {
-      const result = runContainer({ image: image(env, root), repo: root, args, capture: true, timeout, env: dockerEnv });
+      const result = runContainer({ image: image(env, root), repo: root, ...(entrypoint ? { entrypoint } : {}), args, capture: true, timeout, env: dockerEnv });
       // The repo is mounted at /src; paths read as the host's, so the Stop hook can make them relative.
       const output = [result.output, ...result.lines].filter(Boolean).join('\n').replace(/(^|[\s[('"])\/src\//gm, (match, before) => `${before}${root}/`);
       return { ok: result.passed, output };

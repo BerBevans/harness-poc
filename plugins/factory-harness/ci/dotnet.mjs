@@ -118,8 +118,10 @@ const TIMEOUT_MS = 30 * 60 * 1000;
  * `output`. Returns { passed, lines, output }. `env` is Docker's own environment; nothing from it
  * reaches the container. The container is
  * named and always removed, even after a timeout, so it can't keep writing to the worktree while
- * later steps read it. (A SIGKILL of this process skips the clean-up: the workflow must check that
- * no `factory-dotnet-` container is running before it creates a token.)
+ * later steps read it. The timeout sends SIGKILL to the docker CLI: it would pass a SIGTERM on to the
+ * container and keep waiting, so code that ignores SIGTERM would hold it forever. (A SIGKILL of this
+ * process skips the clean-up: the workflow must check that no `factory-dotnet-` container is running
+ * before it creates a token.)
  */
 export function runInContainer({ image, repo, entrypoint, args, run = spawnSync, timeout = TIMEOUT_MS, capture = false, env }) {
   if (!fs.statSync(path.join(repo, '.git'), { throwIfNoEntry: false })?.isDirectory()) {
@@ -129,7 +131,7 @@ export function runInContainer({ image, repo, entrypoint, args, run = spawnSync,
   let result;
   try {
     const io = capture ? { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 } : { stdio: 'inherit' };
-    result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { ...io, timeout, ...(env ? { env } : {}) });
+    result = run('docker', dockerArguments({ image, repo, uid: process.getuid(), gid: process.getgid(), name, entrypoint, args }), { ...io, timeout, killSignal: 'SIGKILL', ...(env ? { env } : {}) });
   } finally {
     run('docker', ['rm', '--force', name], { stdio: 'ignore', timeout: 30000 });
   }
@@ -137,6 +139,13 @@ export function runInContainer({ image, repo, entrypoint, args, run = spawnSync,
   if (result.error?.code === 'ETIMEDOUT') return { passed: false, lines: [`dotnet ran for over ${Math.round(timeout / 1000)} seconds, so it was stopped.`], output };
   if (result.error) throw new Error(`Docker couldn't start: ${result.error.message}`);
   return { passed: result.status === 0, lines: result.status === 0 ? [] : [`dotnet exited with ${result.status ?? result.signal}.`], output };
+}
+
+/** Removes any `factory-dotnet-` container an earlier, killed run left behind. */
+export function removeLeftoverContainers({ run = spawnSync, env } = {}) {
+  const options = { encoding: 'utf8', timeout: 30000, ...(env ? { env } : {}) };
+  const ids = (run('docker', ['ps', '--all', '--quiet', '--filter', 'name=^factory-dotnet-'], options).stdout ?? '').split('\n').filter(Boolean);
+  if (ids.length > 0) run('docker', ['rm', '--force', ...ids], options);
 }
 
 await runIfMain(import.meta.url, env => {

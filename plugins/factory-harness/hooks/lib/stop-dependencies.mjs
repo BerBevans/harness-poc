@@ -6,12 +6,46 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PROGRESS_NOTE_PATH } from './next-step.mjs';
-import { dotnetRunner } from './dotnet.mjs';
+import { removeLeftoverContainers } from '../../ci/dotnet.mjs';
+import { dockerEnvironment, dotnetRunner, inContainer } from './dotnet.mjs';
 import { findSolution, gitLines, hashFile, run } from './process.mjs';
 
 const FAST_TEST_PROJECT = /\.(UnitTests|ArchitectureTests)\.csproj$/i;
 const SKIPPED_FOLDERS = new Set(['.git', 'bin', 'obj', 'node_modules', 'TestResults']);
 const MAX_SEARCH_DEPTH = 6;
+const BUILD_SECONDS = 300;
+const TEST_SECONDS = 120;
+
+const buildArguments = solution => ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'];
+// Quiet verbosity hides assertion messages; the console logger at normal brings them back.
+const testArguments = project => ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
+
+// In a container, the build and every test project run in one container: the packages the build
+// restores live only in that container's /tmp, so a second container's `dotnet test --no-build`
+// finds none, skips the project and exits 0. A status line follows each step. Code in the container
+// could print a fake one, but it could as easily make its own tests pass: CI is the gate. The
+// arguments match buildArguments and testArguments.
+const CHECKS_SCRIPT = `solution="$1"; shift
+dotnet build "$solution" -warnaserror -nologo -v:q -clp:NoSummary
+status=$?; echo "@@factory $status"; [ "$status" -eq 0 ] || exit 0
+for project in "$@"; do
+  dotnet test "$project" --no-build -nologo -v:q --logger 'console;verbosity=normal'
+  echo "@@factory $?"
+done`;
+
+/**
+ * Splits the checks container's output at its status lines into the build's result and each test
+ * project's. A step with no status line (the container timed out or died) failed.
+ */
+export function splitChecks(output, projects) {
+  const parts = output.split(/^@@factory (\d+)\r?$/m);
+  const steps = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) steps.push({ ok: parts[i + 1] === '0', output: parts[i] });
+  const unfinished = { ok: false, output: `${parts.at(-1)}\nThis step didn't finish.`.trim() };
+  const build = steps[0] ?? unfinished;
+  if (!build.ok) return { build, tests: [] };
+  return { build, tests: projects.map((_, i) => steps[i + 1] ?? unfinished) };
+}
 
 export function findTestProjects(root) {
   const found = [];
@@ -80,8 +114,14 @@ export function createStopDependencies(env) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, value);
     },
-    runBuild: (root, solution) => {
-      return dotnet(root, ['build', solution, '-warnaserror', '-nologo', '-v:q', '-clp:NoSummary'], 300);
+    runBuildAndTests: (root, solution, projects) => {
+      if (inContainer(env)) {
+        removeLeftoverContainers({ env: dockerEnvironment(env) });
+        const result = dotnet(root, ['-c', CHECKS_SCRIPT, 'checks', solution, ...projects], BUILD_SECONDS + TEST_SECONDS * projects.length, { entrypoint: 'bash' });
+        return splitChecks(result.output, projects);
+      }
+      const build = dotnet(root, buildArguments(solution), BUILD_SECONDS);
+      return { build, tests: build.ok ? projects.map(project => dotnet(root, testArguments(project), TEST_SECONDS)) : [] };
     },
     // Unknown counts as having projects, so the build runs and reports the real problem.
     solutionHasProjects: (root, solution) => {
@@ -89,11 +129,6 @@ export function createStopDependencies(env) {
       return !result.ok || result.output.split(/\r?\n/).some(line => /\.\w+proj\s*$/i.test(line));
     },
     findTestProjects,
-    runTests: (root, project) => {
-      // Quiet verbosity hides assertion messages; the console logger at normal brings them back.
-      const args = ['test', project, '--no-build', '-nologo', '-v:q', '--logger', 'console;verbosity=normal'];
-      return dotnet(root, args, 120);
-    },
     readProgressNote: root => readTextOrNull(path.join(root, PROGRESS_NOTE_PATH)),
     hasUncommittedChanges: root => gitLines(root, ['status', '--porcelain']).length > 0,
   };

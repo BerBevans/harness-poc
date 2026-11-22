@@ -17,15 +17,20 @@ export function isValidProgressNote(text) {
   return status !== null && PROGRESS_STATUSES.includes(status[1].toLowerCase());
 }
 
+// The count `dotnet test` prints for a project whose tests ran: "Total tests: 4" from the console
+// logger at normal verbosity, "Total: 4" from the minimal summary.
+export const testsRan = output => /\bTotal(?: tests)?:\s*[1-9]/.test(output);
+
 function runChecks(root, solution, deps) {
-  const build = deps.runBuild(root, solution);
+  const projects = deps.findTestProjects(root);
+  const { build, tests } = deps.runBuildAndTests(root, solution, projects);
   if (!build.ok) return { failures: [summariseBuildFailures(build.output)], testProjectCount: 0 };
 
-  const projects = deps.findTestProjects(root);
-  const failures = projects
-    .map(project => deps.runTests(root, project))
-    .filter(result => !result.ok)
-    .map(result => summariseTestFailures(result.output));
+  // A project that reports no tests passed nothing: it was skipped, or its tests were filtered out.
+  const failures = tests.flatMap((result, i) =>
+    !result.ok ? [summariseTestFailures(result.output)]
+      : testsRan(result.output) ? []
+        : [`No tests ran in ${projects[i]}. Every test project needs tests that run, with nothing filtering them out.`]);
   return { failures, testProjectCount: projects.length };
 }
 
@@ -37,7 +42,12 @@ export function decideStop(input, deps) {
   if (!root) return null;
   // Nothing the agent changed means nothing to check: the base is checked by CI.
   if (deps.unchangedFromBase(root)) return null;
-  const solution = deps.findSolution(root);
+  let solution;
+  try {
+    solution = deps.findSolution(root);
+  } catch (error) {
+    return blockStop(error.message);
+  }
   if (!solution) return null;
 
   const fingerprint = deps.fingerprint(root);
