@@ -6,16 +6,17 @@ const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell'
 const MAX_DEPTH = 4;
 
 // Splits on ;, |, &, &&, || and newlines that aren't inside quotes. An & next to a redirect
-// (2>&1, &>file, >&2) isn't a separator.
-function splitOutsideQuotes(command) {
+// (2>&1, &>file, >&2) isn't a separator. With `backslashEscapes` (bash), a backslash escapes the
+// next character; without (PowerShell and cmd, where it separates path parts), it's ordinary.
+function splitOutsideQuotes(command, backslashEscapes) {
   const parts = [];
   let current = '';
   let quote = null;
   for (let i = 0; i < command.length; i++) {
     const char = command[i];
-    if (quote === '"' && char === '\\') { current += char + (command[++i] ?? ''); continue; }
+    if (backslashEscapes && quote === '"' && char === '\\') { current += char + (command[++i] ?? ''); continue; }
     if (quote) { if (char === quote) quote = null; current += char; continue; }
-    if (char === '\\') { current += char + (command[++i] ?? ''); continue; }
+    if (backslashEscapes && char === '\\') { current += char + (command[++i] ?? ''); continue; }
     if (char === '"' || char === "'") { quote = char; current += char; continue; }
     const separatingAmpersand = char === '&' && !/[<>]/.test(command[i - 1] ?? '') && command[i + 1] !== '>';
     if (char === ';' || char === '|' || char === '\n' || separatingAmpersand) {
@@ -42,7 +43,10 @@ export function splitSegments(command, depth = 0) {
   if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
   const segments = [];
   for (const body of substitutions(command)) segments.push(...splitSegments(body, depth + 1));
-  for (const part of splitOutsideQuotes(command)) {
+  // The hook can't tell which shell will run the line, so it splits it both ways and checks every
+  // part: an extra part only ever blocks more.
+  const parts = new Set([...splitOutsideQuotes(command, true), ...splitOutsideQuotes(command, false)]);
+  for (const part of parts) {
     const segment = part.trim().replace(/^(?:[({]\s*)+/, '').replace(/(?:\s*[)}])+$/, '').trim();
     if (!segment) continue;
     segments.push(segment);

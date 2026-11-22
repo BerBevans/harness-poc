@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bash, decisionTable, fakeContext, HOME, read, REPO, write } from './helpers.mjs';
+import { bash, decisionTable, fakeContext, HOME, powershell, read, REPO, write } from './helpers.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +35,10 @@ decisionTable({
     ['pwsh -ExecutionPolicy Bypass -Command', bash('pwsh -ExecutionPolicy Bypass -Command "git reset --hard"')],
     ['an escaped quote outside quotes', bash("echo it\\'s; git push --force")],
     ['process substitution', bash('cat <(git reset --hard)')],
+    // A delete, not git: the git rules scan every token, so only a rule reading the program name
+    // shows whether the line split.
+    ['a PowerShell path ending in a backslash', powershell('cd C:\\repo\\; Remove-Item .github\\workflows\\ci.yml')],
+    ['a quoted PowerShell path ending in a backslash', powershell('Set-Location "C:\\repo\\"; Remove-Item .github\\workflows\\ci.yml')],
     ['a write inside bash -c', bash('bash -c "echo x > .github/workflows/ci.yml"')],
     ['substitution inside bash -c', bash('bash -c "echo $(git reset --hard)"')],
     ['linking to a guarded file', bash('ln -s ../Directory.Build.props src/settings.props')],
