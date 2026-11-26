@@ -164,6 +164,14 @@ export const blocked = [
   ['push --e=', "git push --e='g''it commit -n -qam y; git-receive-pack' ."],
   ['clone --u=', "git clone --u='g''it commit -n -qam y' src dst"],
   ['grep --op=', "git grep --op='g''it commit -n -qam y #' foo"],
+  // The twin's fifth review: blanking must not hide code. A config-read word holding a
+  // substitution, a "message" git takes as a flag, and a function shadowing git.
+  ['a substitution in a config-read word naming hooksPath', `git config --get user.name "hookspath $(node -e 'require("child_process").execSync("git commit --no-verify -m x")')"`],
+  ['-n taken as a message after a template cluster', 'git commit -at -m -n -m msg'],
+  ['-n taken as a message after an F cluster', 'git commit -aF -m -n'],
+  ['a decoded -n taken as a message after a template cluster', "git commit -at -m $'-n' -m msg"],
+  ['-n taken as a message after an abbreviated template', 'git commit --templ -m -n -m msg'],
+  ['a git function running its message as node code', `git() { node -e "$3"; }; git commit -m 'require("child_process").execSync("git commit --no-verify -m x")'`],
   // Fail closed.
   ['bash the parser refuses', 'echo $[1+1]'],
 ];

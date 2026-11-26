@@ -31,6 +31,9 @@ const WRAPPERS = [
   { wrap: s => `for x in ${quote(s)}; do :; done` },
   { wrap: s => `[[ ${quote(s)} == x ]]` },
   { wrap: s => `# ${s}\ntrue` },
+  // A function named git or gh can run a literal "message" or "key" as code.
+  { wrap: s => `git() { node -e "$3"; }; ${s}` },
+  { wrap: s => `gh() { node -e "$4"; }; ${s}` },
 ];
 
 // Old-guard denials the new guard is meant to drop: the allowed cases, run directly, where the

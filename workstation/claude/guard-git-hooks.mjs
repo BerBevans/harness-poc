@@ -271,11 +271,11 @@ function wordReason(word, ctx) {
 }
 
 // The floor that keeps the guard no weaker than the text rules it replaced. They run over the
-// code as the parser read it (words, assignments, redirect targets and here-document bodies)
-// minus what it proves is data: literal commit messages and gh bodies, quoted here-document
-// bodies when every command is a plain file or git command (DATA_COMMANDS), and hooksPath in
-// git config reads. The terms
-// and guarded-folder rules run over the whole source, data included.
+// whole source minus what the parser proves is data: literal commit messages and gh bodies,
+// quoted here-document bodies when every command is a plain file or git command
+// (DATA_COMMANDS), and a literal hooksPath key in a git config read. Nothing is blanked when
+// the command defines a function, which could make git or gh run its "message" as code. The
+// terms and guarded-folder rules run over the whole source, data included.
 const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'printf', 'rm', 'mv', 'cp',
   'true', 'wc', 'head', 'tail', 'sort', 'diff', 'touch', 'test', '[', 'pwd']);
 // The git subcommand and its index, skipping global options as gitReason does.
@@ -300,7 +300,9 @@ function floorReason(source, parsed, ctx) {
   const text = source.split('');
   const blank = (start, end) => { if (start !== null) for (let i = start; i < end; i++) if (text[i] !== '\n') text[i] = ' '; };
   const blankWord = w => w.start !== null && source.startsWith(w.raw, w.start) && blank(w.start, w.start + w.raw.length);
-  for (const command of parsed.commands) {
+  // git() { node -e "$3"; } would run a literal "message" as code.
+  const commands = parsed.functions.size ? [] : parsed.commands;
+  for (const command of commands) {
     const words = command.words;
     const name = words[0] ? commandName(words[0]) : '';
     const sub = isGit(name) ? gitSubcommand(name, words) : null;
@@ -309,9 +311,13 @@ function floorReason(source, parsed, ctx) {
     const opts = MESSAGE_OPTS[isGit(name) ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (isConfigRead && i > sub.index && /hookspath/i.test(w.value)) blankWord(w);
-      else if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) blankWord(words[++i]);
-      else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2) || (o.startsWith('--') && w.value.startsWith(`${o}=`)))) blankWord(w);
+      // A key is a literal like core.hooksPath; a word holding a substitution is code.
+      if (isConfigRead && i > sub.index && !w.dynamic && /^[\w.-]+$/.test(w.value) && /hookspath/i.test(w.value)) blankWord(w);
+      // A "message" starting with "-" may be an option git read differently (-at -m -n: -t
+      // takes -m, so -n is a flag); it is never blanked.
+      else if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) { if (!words[++i].value.startsWith('-')) blankWord(words[i]); }
+      else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2 && w.value[2] !== '-') ||
+        (o.startsWith('--') && w.value.startsWith(`${o}=`) && w.value[o.length + 1] !== '-'))) blankWord(w);
     }
     for (const r of command.redirects) if (r.heredoc?.quoted && dataOnly) blank(r.heredoc.start, r.heredoc.end);
   }
@@ -801,6 +807,10 @@ function hookSkippingReason(name, args) {
     // An option's value is skipped, unless an unquoted variable could split it into more words.
     if (valueOpts.includes(word.value)) {
       if (args[i + 1]?.dynamic && hasUnquotedExpansion(args[i + 1].raw)) return REASON.unseen(`an unquoted git ${name} ${word.value} value known only when it runs (it could split into a flag that skips hooks)`);
+      // A "value" that is itself the skip flag: an earlier option may have taken this one as
+      // its value (-at -m -n, --templ -m -n), leaving the flag to git.
+      const value = args[i + 1]?.value ?? '';
+      if (isNoVerify(value) || (name === 'commit' && commitClusterSkips(value))) return REASON.noVerify;
       i++; continue;
     }
     if (word.dynamic || word.glob) {
@@ -811,14 +821,19 @@ function hookSkippingReason(name, args) {
       if (/^["']?[^-$`"'{*?[\\]/.test(word.raw) || /:/.test(word.raw.replace(/\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`/g, ''))) continue;
       return REASON.unseen(`a git ${name} argument known only when it runs (it could be a flag that skips hooks)`);
     }
-    if (name === 'commit' && /^-[^-]/.test(word.value)) {
-      for (const ch of word.value.slice(1)) {
-        if (ch === 'n') return REASON.noVerify;
-        if (COMMIT_VALUE_FLAGS.has(ch)) break;
-      }
-    }
+    if (name === 'commit' && commitClusterSkips(word.value)) return REASON.noVerify;
   }
   return null;
+}
+
+// A git commit short-option cluster that reaches -n before an option taking the rest as its value.
+function commitClusterSkips(value) {
+  if (!/^-[^-]/.test(value)) return false;
+  for (const ch of value.slice(1)) {
+    if (ch === 'n') return true;
+    if (COMMIT_VALUE_FLAGS.has(ch)) return false;
+  }
+  return false;
 }
 
 /**
