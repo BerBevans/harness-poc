@@ -1,0 +1,52 @@
+{
+  "env": {
+    "NUGET_PACKAGES": "/home/<user>/.cache/agent-nuget/packages",
+    "NUGET_HTTP_CACHE_PATH": "/home/<user>/.cache/agent-nuget/http-cache"
+  },
+  "permissions": {
+    "additionalDirectories": ["~/src/harness-journal"]
+  },
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false,
+    "autoAllowBashIfSandboxed": true,
+    "filesystem": {
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.azure",
+        "~/.claude/.credentials.json",
+        "/mnt/c/Users/<windows-user>/.ssh",
+        "/mnt/c/Users/<windows-user>/.aws",
+        "/mnt/c/Users/<windows-user>/.azure",
+        "/mnt/c/Users/<windows-user>/.claude/.credentials.json"
+      ],
+      "allowWrite": [
+        "~/.npm",
+        "~/.cache/agent-nuget",
+        "~/.claude/twin",
+        "/mnt/c/Users/<windows-user>/.claude/twin"
+      ],
+      "denyWrite": [
+        "~/.gitconfig",
+        "~/.config/git",
+        "~/.claude/twin/.git/hooks",
+        "~/.claude/twin/.git/config",
+        "/mnt/c/Users/<windows-user>/.claude/twin/.git/hooks",
+        "/mnt/c/Users/<windows-user>/.claude/twin/.git/config",
+        "~/src/harness-journal/.git/hooks",
+        "~/src/harness-journal/.git/config"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "*.githubusercontent.com",
+        "api.nuget.org",
+        "registry.npmjs.org"
+      ]
+    }
+  }
+}
