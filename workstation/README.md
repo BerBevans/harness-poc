@@ -60,13 +60,13 @@ The hook pattern-matches text, so it's fast feedback, not enforcement. It won't 
 
 ## claude/sandbox-settings.json - Claude Code sandbox (WSL)
 
-The hook reads command text; the sandbox enforces at the OS level. On WSL2, Claude Code runs every Bash command and its child processes (scripts, `node -e`, git, its hooks) under bubblewrap, so the file rules hold however a command is spelt. `failIfUnavailable` stops a session starting without the sandbox. Native Windows has no sandbox, so Claude Code runs only in WSL (shim below). The Windows and WSL installs each have their own `settings.json`.
+The hook reads command text; the sandbox enforces at the OS level. On WSL2, Claude Code runs every Bash command and its child processes (scripts, `node -e`, git, its hooks) under bubblewrap, so the file rules hold however a command is spelt. `failIfUnavailable` stops a session starting without the sandbox. Native Windows has no sandbox, so agent work runs only in WSL, through the launcher below; the native Windows install is kept only as `claude-admin`. The Windows and WSL installs each have their own `settings.json`.
 
 What the fragment does (each point was checked in a scratch run on 2026-11-26):
 
 - Writes are allowed only in the working folder (where the session started, fixed for the session), `$TMPDIR`, the journal (an additional directory), the twin repo and the npm and agent NuGet caches. Everything else is read-only, `~/.config/git` and `~/.gitconfig` included. Claude Code also protects `~/.claude`, settings files and the working folder's `.git/hooks` and `.git/config` by itself.
 - The twin and journal repos are writable, so their `.git/hooks` and `.git/config` are denied explicitly: a planted hook would run unsandboxed the next time I use git there. Commits still work.
-- What runs unsandboxed at the next start is denied too: `~/.local/bin` (the launcher), the PowerShell profile folders (with and without OneDrive's Documents redirect) and the Windows Startup folder. These back up the launcher's folder check.
+- What runs unsandboxed at the next start is denied too: `~/.local/bin` (the launcher) and `~/.local/share/claude` (the binary it runs), the login shell's profiles (`~/.profile`, `~/.bash_profile`, `~/.bash_login`, `~/.bashrc`), `claude-admin`'s binary, settings and hooks on the Windows side, the PowerShell profile folders (with and without OneDrive's Documents redirect) and the Windows Startup folder. These back up the launcher's folder check, for a session started some other way.
 - NuGet uses an agent-only cache, because NuGet doesn't re-check packages it has already extracted. A package tampered with in the shared cache would run in my own builds.
 - `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox.
 - The network goes through a proxy that allows only GitHub, NuGet (`api.nuget.org` is enough for restore) and npm. Add a host only when something needs it, and never a wildcard that covers hosts anyone can rent, such as `*.blob.core.windows.net`.
@@ -82,6 +82,10 @@ Containers: none in agent sessions. Docker's socket is blocked, and rootless Pod
 
 The twin repo is writable, so an agent could edit the twin's own profile. That's accepted for a personal repo.
 
+Claude Code protects only the start folder's own `.git`, so a repo nested inside it (a clone under `.test-work/`, say) has writable git hooks. Accepted: they run only when git is used in that nested repo.
+
+After installing, check in a session that `touch ~/.gitconfig`, `touch ~/.local/bin/x` and a write to the PowerShell profile folder all fail with "Read-only file system".
+
 Test: `node --test "workstation/claude/*.test.mjs"` pins the whole fragment, so any change, a new key included, means changing the test too. It checks the repo copy, not the installed settings: after editing either, merge by hand again.
 
 Install (WSL):
@@ -95,7 +99,7 @@ Back up `~/.claude/settings.json`, merge the fragment into it by hand, replacing
 
 ## claude/claude-wsl - the launcher
 
-The sandbox always lets a session write to the folder it started in. Started in `~`, a session could rewrite this launcher or a shell profile; started in the Windows home, the PowerShell profile; started in `~/src`, every repo's git hooks. So `claude-wsl` starts Claude only inside a git repository under `~/src`, after resolving symlinks, and refuses anywhere else (including inside a `.git` folder) with a message pointing at `claude-admin`. Both routes to Claude go through it: `claude` in a WSL shell and `claude` in PowerShell.
+The sandbox always lets a session write to the folder it started in. Started in `~`, a session could rewrite this launcher or a shell profile; started in the Windows home, the PowerShell profile; started in `~/src`, every repo's git hooks. So `claude-wsl` starts Claude only inside a git repository under `~/src`, after resolving symlinks, and refuses anywhere else (including inside a `.git` folder) with a message pointing at `claude-admin`. The two routes I use go through it: `claude` in an interactive WSL shell and `claude` in PowerShell. Anything that runs `~/.local/bin/claude` directly (`wsl claude` from cmd, `command claude`, an IDE extension) skips the check; the deny entries in the sandbox section are what cover that.
 
 `claude-admin` on Windows is the native Windows Claude Code, kept as an unsandboxed admin console for maintaining these controls only: manual permission mode, the guard hook installed, never used for coding.
 
@@ -103,7 +107,8 @@ Install (in a WSL terminal outside Claude: a sandboxed session can't write these
 
 ```sh
 install -m 755 workstation/claude/claude-wsl ~/.local/bin/claude-wsl
-echo 'claude() { "$HOME/.local/bin/claude-wsl" "$@"; }' >> ~/.bashrc
+grep -q 'claude-wsl' ~/.bashrc || echo 'claude() { "$HOME/.local/bin/claude-wsl" "$@"; }' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 Test: `claude-wsl.test.mjs` pins the allowed and refused folders.

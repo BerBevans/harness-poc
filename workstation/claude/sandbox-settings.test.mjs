@@ -32,11 +32,13 @@ const expected = {
       allowWrite: sorted(['~/.npm', '~/.cache/agent-nuget', ...twin]),
       // The git guardrails, and the hooks and config of every writable repo: a planted hook would
       // run unsandboxed the next time Ben uses git there. Then what runs unsandboxed at the next
-      // start: the launcher, PowerShell profiles (Documents may be redirected to OneDrive) and
+      // start: the launcher and the real binary, the login shell's profiles, claude-admin's binary,
+      // settings and hooks, PowerShell profiles (Documents may be redirected to OneDrive) and
       // Windows Startup. The launcher's own folder check is the first line; these back it up.
       denyWrite: sorted([
         '~/.gitconfig', '~/.config/git', ...[...twin, journal].flatMap(r => [`${r}/.git/hooks`, `${r}/.git/config`]),
-        '~/.local/bin',
+        '~/.local/bin', '~/.local/share/claude', '~/.profile', '~/.bash_profile', '~/.bash_login', '~/.bashrc',
+        ...['.local/bin', '.claude/settings.json', '.claude/settings.local.json', '.claude/hooks'].map(p => `${win}/${p}`),
         ...['Documents', 'OneDrive/Documents'].flatMap(d => ['WindowsPowerShell', 'PowerShell'].map(p => `${win}/${d}/${p}`)),
         `${win}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`,
       ]),
