@@ -118,7 +118,9 @@ function hasUnquotedExpansion(raw) {
   }
   return false;
 }
-const isGitConfigPath = p => /(^|\/)\.git\/config$/.test(norm(p));
+const isGitConfigPath = p => /(^|\/)\.git\/config$/.test(norm(p).replace(/\/(\.\/)+/g, '/').replace(/\/{2,}/g, '/'));
+// A .git folder as the target of cp, mv, install or ln, which would write files into it.
+const isGitDirPath = p => /(^|\/)\.git\/*$/.test(norm(p).replace(/\/(\.\/)+/g, '/'));
 
 // Every way a command might spell the home directory: C:/Users/x, /c/Users/x, ~, $HOME...
 function homeForms(home) {
@@ -148,11 +150,13 @@ function makeContext(env) {
 // code passed inline to an interpreter.
 const tokenise = s => s.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 function commitUsesShortNoVerify(text) {
-  for (const segment of text.split(/&&|\|\||[;|\n]/)) {
-    // git after a quote too, as in code passed to an interpreter: execSync('git commit -n').
-    const m = /(?:^|[\s(`'"])(?:[^\s"'`]*[/\\])?git(?:\.exe)?["']?\s+(.*)$/i.exec(segment);
-    if (!m) continue;
-    const tokens = tokenise(m[1]);
+  // Every git in every segment: git after a quote too, as in code passed to an interpreter
+  // (execSync('git commit -n')), and after "=" as in an option value (-oProxyCommand=git ...).
+  const starts = [...text.split(/&&|\|\||[;|&\n]/)].flatMap(segment =>
+    [...segment.matchAll(/(?<=^|[\s(`'"=])(?:[^\s"'`=]*[/\\])?git(?:\.exe)?["']?(?:\\?\s)+/gi)]
+      .map(m => segment.slice(m.index + m[0].length).replace(/\\(\s)/g, '$1')));
+  for (const rest of starts) {
+    const tokens = tokenise(rest);
     let i = 0;
     while (i < tokens.length && tokens[i].startsWith('-')) i += GIT_OPTS_WITH_VALUE.has(tokens[i]) ? 2 : 1;
     if (tokens[i] !== 'commit') continue;
@@ -243,30 +247,39 @@ function wordReason(word, ctx) {
 // The floor that keeps the guard no weaker than the text rules it replaced. They run over the
 // code as the parser read it (words, assignments, redirect targets and here-document bodies)
 // minus what it proves is data: literal commit messages and gh bodies, quoted here-document
-// bodies written to a file or git (DATA_SINKS) when nothing in the command runs a script or
-// shell, and git config reads. The terms
+// bodies when every command is a plain file or git command (DATA_COMMANDS), and hooksPath in
+// git config reads. The terms
 // and guarded-folder rules run over the whole source, data included.
-const DATA_SINKS = new Set(['cat', 'tee', 'git', 'gh']);
+const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'printf', 'rm', 'mv', 'cp',
+  'true', 'wc', 'head', 'tail', 'sort', 'diff', 'touch', 'test', '[', 'pwd']);
+// The git subcommand and its index, skipping global options as gitReason does.
+function gitSubcommand(name, words) {
+  if (name !== 'git') return { name: name.slice(4), index: 0 };
+  for (let i = 1; i < words.length; i++) {
+    if (!words[i].value.startsWith('-')) return { name: words[i].value, index: i };
+    if (GIT_OPTS_WITH_VALUE.has(words[i].value)) i++;
+  }
+  return null;
+}
 const MESSAGE_OPTS = { git: ['-m', '--message'], gh: ['-b', '--body', '-t', '--title'] };
 function floorReason(source, parsed, ctx) {
   if (ctx.mentionsTerms(source)) return REASON.terms;
   if (ctx.guardedDirs.some(g => norm(source).includes(g) || expandHome(source, ctx.home).includes(g))) return REASON.guarded;
-  const runsCode = parsed.commands.some(c => c.words.some(w => {
-    const name = commandName(w);
-    return w.dynamic || SHELLS.has(name) || POWERSHELLS.has(name) || Object.hasOwn(INTERPRETERS, name) ||
-      name === 'source' || name === '.' || w.value.includes('/') && w === c.words[0];
-  }));
+  // Quoted here-documents are data only when every command is one of these (awk, make or npm
+  // could run what a here-document writes or pipes on).
+  const dataOnly = parsed.commands.every(c => !c.words.length || (!c.words[0].dynamic && DATA_COMMANDS.has(commandName(c.words[0]))));
   const lines = [];
   for (const command of parsed.commands) {
     const words = command.words;
     const name = words[0] ? commandName(words[0]) : '';
-    const isConfigRead = isGit(name) && words.some(w => w.value === 'config') &&
-      configReason(words.slice(words.findIndex(w => w.value === 'config') + 1)) === null;
+    const sub = isGit(name) ? gitSubcommand(name, words) : null;
+    const isConfigRead = sub?.name === 'config' && configReason(words.slice(sub.index + 1)) === null;
     const kept = [];
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (isConfigRead && /hookspath/i.test(w.value)) continue;
-      const opts = MESSAGE_OPTS[isGit(name) ? 'git' : name] ?? [];
+      if (isConfigRead && i > sub.index && /hookspath/i.test(w.value)) continue;
+      // -m is a message only for these; elsewhere (fetch -m, rebase -m) it takes no value.
+      const opts = MESSAGE_OPTS[isGit(name) ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
       if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) { i++; continue; }
       if (opts.some(o => o.length === 2 && w.value.startsWith(o) && w.value.length > 2) && !w.dynamic) continue;
       if (opts.some(o => o.startsWith('--') && w.value.startsWith(`${o}=`)) && !w.dynamic) continue;
@@ -275,7 +288,7 @@ function floorReason(source, parsed, ctx) {
     for (const a of command.assignments) kept.push(a.value.raw);
     for (const r of command.redirects) {
       kept.push(r.target.raw);
-      if (r.heredoc && !(r.heredoc.quoted && !runsCode && DATA_SINKS.has(name))) lines.push(...r.heredoc.body.split('\n'));
+      if (r.heredoc && !(r.heredoc.quoted && dataOnly)) lines.push(...r.heredoc.body.split('\n'));
     }
     lines.push(kept.join(' '));
   }
@@ -296,7 +309,8 @@ function variableFacts(source, commands, functions) {
   for (const m of source.matchAll(/\b(?:read|mapfile|readarray|getopts|printf\s+-v)\b([^;&|\n]*)/g)) {
     for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
   }
-  const disabled = commands.some(c => c.words[0] && ['source', '.', 'eval'].includes(c.words[0].value));
+  // IFS changes how bash splits words, so a value with no blanks can still split into a flag.
+  const disabled = /\bIFS\b/.test(source) || commands.some(c => c.words[0] && ['source', '.', 'eval'].includes(c.words[0].value));
   // Functions that run their arguments as a command (t() { ...; "$@"; }): each call's
   // arguments are checked as that command.
   const forwarders = new Set([...functions].filter(([, body]) => body.some(isForward)).map(([name]) => name));
@@ -378,10 +392,20 @@ function harmlessCommandVariable(word, facts) {
 function envReason(name, value) {
   if (GUARDED_ENV.test(name)) return REASON.env(name);
   if (COMMAND_ENV.test(name)) {
-    // A literal program and options (GIT_EDITOR=true, GIT_SSH_COMMAND="ssh -i key"), nothing more.
+    // A literal program and its options (GIT_EDITOR=true, EDITOR="code --wait"), nothing that
+    // runs another command: no words other than options, for ssh no config file, and no -o
+    // key that runs a command (ProxyCommand, LocalCommand, Match exec).
     const text = value.raw.replace(/^(["'])(.*)\1$/s, '$2');
-    const program = text.split(/\s+/)[0].split('/').pop().toLowerCase();
-    if (/[$`;&|<>()\n]/.test(text) || !/^[\w.+-]+$/.test(program) || isUnsafe(program)) return REASON.env(name);
+    const tokens = text.split(/\s+/).filter(Boolean);
+    const program = (tokens[0] ?? '').split('/').pop().toLowerCase();
+    const ssh = program === 'ssh';
+    let ok = !/[$`;&|<>()\\\n'"]/.test(text) && /^[\w.+-]+$/.test(program) && !isUnsafe(program);
+    for (let i = 1; ok && i < tokens.length; i++) {
+      if (ssh && ['-i', '-p', '-l', '-o'].includes(tokens[i])) { i++; continue; }
+      // -F names a config file, which can hold a ProxyCommand.
+      ok = tokens[i].startsWith('-') && !(ssh && /^-[^-]*F/.test(tokens[i]));
+    }
+    if (!ok || (ssh && /command|match/i.test(text))) return REASON.env(name);
   }
   // A PATH that puts a folder before the existing one can shadow git with another program.
   if (name === 'PATH' && !/^["']?\$\{?PATH\}?(:|["']?$)/.test(value.raw)) return REASON.env('PATH (other than appending to it)');
@@ -525,6 +549,7 @@ function startReason(command, start, ctx, nesting, facts) {
     if (values.some(v => /(^|\/)\.git(\/|$)/.test(norm(v)))) return REASON.gitDir;
   }
   if (!READERS.has(name) && values.some(isGitConfigPath)) return REASON.gitDir;
+  if (['cp', 'mv', 'install', 'ln', 'rsync'].includes(name) && values.some(isGitDirPath)) return REASON.gitDir;
   if (name === 'eval') {
     if (args.some(w => w.dynamic)) return REASON.unseen('eval of a string known only when it runs');
     return bashReason(values.join(' '), ctx, nesting + 1, facts);
@@ -658,12 +683,18 @@ function gitReason(args, ctx, nesting) {
     const strings = rest.slice(values.indexOf('foreach') + 1).filter(w => !w.value.startsWith('--'));
     for (const word of strings) { const reason = stringReason(word, ctx, nesting); if (reason) return reason; }
   }
-  if (name === 'rebase') {
-    for (let j = 0; j < rest.length; j++) {
-      const value = rest[j].value;
-      const code = value === '-x' || value === '--exec' ? rest[j + 1] : value.startsWith('--exec=') ? { ...rest[j], value: value.slice(7) } : null;
-      if (code) { const reason = stringReason(code, ctx, nesting); if (reason) return reason; }
-    }
+  // Options whose value is a command git runs through the shell.
+  const commandOpts = ['--exec', '--upload-pack', '--receive-pack', '--extcmd', '--sendmail-cmd', '--to-cmd', '--cc-cmd',
+    ...(name === 'rebase' || name === 'difftool' ? ['-x'] : []),
+    ...(['fetch', 'clone', 'pull', 'ls-remote'].includes(name) ? ['-u'] : [])];
+  for (let j = 0; j < rest.length; j++) {
+    const value = rest[j].value;
+    const long = commandOpts.find(o => o.startsWith('--') && value.startsWith(`${o}=`));
+    const code = commandOpts.includes(value) ? rest[j + 1]
+      : long ? { ...rest[j], value: value.slice(long.length + 1), raw: rest[j].raw.slice(long.length + 1) }
+      : name === 'grep' && /^-O.|^--open-files-in-pager=/.test(value) ? { ...rest[j], value: value.replace(/^-O|^--open-files-in-pager=/, ''), raw: rest[j].raw.replace(/^-O|^--open-files-in-pager=/, '') }
+      : null;
+    if (code) { const reason = stringReason(code, ctx, nesting); if (reason) return reason; }
   }
   if (name === 'bisect' && values[0] === 'run') {
     return commandReason({ words: rest.slice(1), assignments: [], redirects: [], pipedFrom: null }, ctx, nesting + 1, NO_FACTS);
