@@ -12,6 +12,8 @@ const isMeta = c => c === undefined || ' \t\n;&|<>()'.includes(c);
 const PREFIX_WORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', 'time', 'coproc']);
 const END_WORDS = new Set(['fi', 'done', 'esac']);
 const ANSI_C = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v', '\\': '\\', "'": "'", '"': '"', '?': '?' };
+const NAMED_FD = /\{[A-Za-z_]\w*\}[<>]/y;
+const ASSIGNMENT = /^([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=/;
 const REDIRECT = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)/;
 
 /**
@@ -22,19 +24,31 @@ const REDIRECT = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)/;
  * @typedef {{assignments: {name: string, value: Word}[], words: Word[], redirects: Redirect[],
  *   pipedFrom: SimpleCommand|'compound'|null}} SimpleCommand
  *   pipedFrom is the command whose output a pipe feeds into this one's stdin, or 'compound'
- *   when it comes from a subshell, group or loop.
+ *   when it comes from a subshell, group or loop. null means unknown, not clean: commands
+ *   inside a compound that is piped into (echo x | (sh)) also show null.
  * @returns {{commands: SimpleCommand[], functions: Map<string, SimpleCommand[]>}}
  */
 export function parseShell(source) {
+  if (source.includes('\0')) throw new ShellParseError('the command contains a NUL byte');
+  // bash removes a line continuation before it splits words, so one inside a word, a reserved
+  // word, a quoted string or a here-document line changes what runs. Only continuations after a
+  // blank or an operator are read; any other throws.
+  if (/[^ \t;&|()]\\\n/.test(source)) throw new ShellParseError('a line continuation inside a word');
   const sink = { commands: [], functions: new Map() };
-  new Parser(source, 0, sink).parseList(null);
+  try {
+    new Parser(source, 0, sink).parseList(null);
+  } catch (error) {
+    // Any failure, including a stack overflow, must reach the guard as a parse error so it denies.
+    if (error instanceof ShellParseError) throw error;
+    throw new ShellParseError(`the parser failed: ${error.message}`);
+  }
   return sink;
 }
 
 class Parser {
   constructor(src, depth, sink) {
     if (depth > MAX_DEPTH) throw new ShellParseError(`the command nests more than ${MAX_DEPTH} levels deep`);
-    Object.assign(this, { src, depth, sink, pos: 0, heredocs: [], groups: [], pendingFunction: null });
+    Object.assign(this, { src, depth, sink, pos: 0, heredocs: [], groups: [], pendingFunction: null, heredocFloor: 0 });
   }
 
   fail(message) { throw new ShellParseError(`${message} (at character ${this.pos})`); }
@@ -58,7 +72,10 @@ class Parser {
     }
   }
 
-  newline() { this.pos++; this.readHeredocs(); }
+  newline() {
+    if (this.heredocFloor) this.fail('a here-document is pending across a command substitution');
+    this.pos++; this.readHeredocs();
+  }
 
   skipBlanksAndNewlines() {
     for (;;) { this.skipBlanks(); if (this.peek() !== '\n') return; this.newline(); }
@@ -105,6 +122,8 @@ class Parser {
       this.skipBlanks();
       const c = this.peek();
       if (c === undefined || c === '\n' || c === ';' || c === '|' || c === ')' || (c === '&' && this.peek(1) !== '>')) break;
+      NAMED_FD.lastIndex = this.pos;
+      if (NAMED_FD.test(this.src)) this.fail('named file descriptors ({name}>) are not supported');
       const atStart = !command.words.length && !command.assignments.length && !command.redirects.length;
       if (atStart) {
         const before = this.pos;
@@ -115,10 +134,12 @@ class Parser {
       if (c === '(') this.fail('unexpected (');
       const word = this.readWord();
       if (!word) this.fail(`unexpected ${c}`);
-      const assignment = !command.words.length && /^([A-Za-z_]\w*)\+?=/.exec(word.raw);
-      if (assignment) {
-        if (word.raw.endsWith('=') && this.peek() === '(') { this.pos++; this.wordsUntil(')'); word.dynamic = true; }
-        command.assignments.push({ name: assignment[1], value: { ...word, value: word.value.slice(word.value.indexOf('=') + 1) } });
+      const assignment = ASSIGNMENT.exec(word.raw);
+      // An array value, as a prefix or an argument to declare, local and the like.
+      if (assignment && word.raw.endsWith('=') && this.peek() === '(') { this.pos++; this.wordsUntil(')'); word.dynamic = true; }
+      if (assignment && !command.words.length) {
+        const rest = word.raw.slice(assignment[0].length);
+        command.assignments.push({ name: assignment[1], value: { ...word, value: word.value.slice(word.value.indexOf('=') + 1), tilde: /^~|:~/.test(rest) } });
       } else {
         command.words.push(word);
       }
@@ -149,7 +170,7 @@ class Parser {
       if (word === 'case') { this.pos += 4; this.caseClause(); return true; }
       if (word === '[[') { this.pos += 2; this.testClause(); return false; }
       if (word === 'function') { this.pos += 8; this.skipBlanks(); this.functionHeader(this.bareWord()); return true; }
-      if (/^\s*\(\s*\)/.test(this.src.slice(this.pos + word.length))) { this.functionHeader(word); return true; }
+      if (/^[ \t]*\([ \t]*\)/.test(this.src.slice(this.pos + word.length))) { this.functionHeader(word); return true; }
       return false;
     }
   }
@@ -157,7 +178,7 @@ class Parser {
   functionHeader(name) {
     if (!name) this.fail('function without a name');
     this.pos += name.length;
-    const parens = /^\s*\(\s*\)/.exec(this.src.slice(this.pos));
+    const parens = /^[ \t]*\([ \t]*\)/.exec(this.src.slice(this.pos));
     if (parens) this.pos += parens[0].length;
     this.pendingFunction = name;
   }
@@ -175,6 +196,17 @@ class Parser {
     const start = this.sink.commands.length;
     this.nested(() => this.parseList(')'));
     if (fn) this.sink.functions.set(fn, this.sink.commands.slice(start));
+  }
+
+  // $(...), <(...) and >(...). bash's rules for a here-document opened on one side of a
+  // substitution's edge and read on the other are subtle, so a newline inside a substitution
+  // while an outer here-document is pending, or one left open at its ")", throws.
+  substitution() {
+    const floor = this.heredocFloor;
+    this.heredocFloor = this.heredocs.length;
+    this.nested(() => this.parseList(')'));
+    if (this.heredocs.length > this.heredocFloor) this.fail('a here-document is not terminated inside its substitution');
+    this.heredocFloor = floor;
   }
 
   // Runs a nested list on the same source; groups opened inside must close inside.
@@ -225,6 +257,7 @@ class Parser {
       if (this.peek() === undefined) this.fail('missing ]]');
       if (this.atWord(']]')) { this.pos += 2; return; }
       if (this.peek() === '\n') { this.newline(); continue; }
+      if ('<>'.includes(this.peek()) && this.peek(1) === '(') { this.readWord(); continue; }
       if ('<>()!|&'.includes(this.peek())) { this.pos++; continue; }
       if (!this.readWord()) this.fail('bad word in [[');
     }
@@ -266,6 +299,7 @@ class Parser {
         this.pos = Math.min(end + 1, this.src.length);
         if (redirect.op === '<<-') line = line.replace(/^\t+/, '');
         if (line === delimiter) break;
+        if (!redirect.target.quoted && line.endsWith('\\')) this.fail('a line continuation in a here-document');
         lines.push(line);
       }
       const body = lines.map(line => `${line}\n`).join('');
@@ -299,7 +333,7 @@ class Parser {
       }
       if ((c === '<' || c === '>') && this.peek(1) === '(') {
         const from = this.pos;
-        this.pos += 2; this.nested(() => this.parseList(')'));
+        this.pos += 2; this.substitution();
         value += this.src.slice(from, this.pos); dynamic = true; continue;
       }
       if (isMeta(c)) break;
@@ -311,13 +345,14 @@ class Parser {
       if (c === '$' && this.peek(1) === "'") { this.pos += 2; value += this.readAnsiC(); quoted = true; continue; }
       if (c === '"' || (c === '$' && this.peek(1) === '"')) {
         this.pos += c === '"' ? 1 : 2;
-        const part = this.readDouble(); value += part.value; dynamic ||= part.dynamic; quoted = true; continue;
+        // $"..." can be replaced by a translation, so its value is not certain.
+        const part = this.readDouble(); value += part.value; dynamic ||= part.dynamic || c === '$'; quoted = true; continue;
       }
       if (c === '$') { const part = this.readDollar(); value += part; dynamic ||= part !== '$'; continue; }
       if (c === '`') { value += this.readBacktick(false); dynamic = true; continue; }
       if ('*?['.includes(c)) glob = true;
       // Brace expansion ({a,b} or {1..3}) turns one word into several.
-      if (c === '{') brace = value.length;
+      if (c === '{' && brace < 0) brace = value.length;
       if (c === '}' && brace >= 0 && /,|\.\./.test(value.slice(brace))) dynamic = true;
       value += c; this.pos++;
     }
@@ -344,22 +379,24 @@ class Parser {
   readDollar() {
     const start = this.pos++;
     const c = this.peek();
-    if (this.startsWith('((')) { this.pos += 2; this.readArithmetic(); }
-    else if (c === '(') { this.pos++; this.nested(() => this.parseList(')')); }
-    else if (c === '{') { this.pos++; this.readBraces(); }
+    if (this.startsWith('((')) { this.pos += 2; this.nested(() => this.readArithmetic()); }
+    else if (c === '(') { this.pos++; this.substitution(); }
+    else if (c === '{') { this.pos++; this.nested(() => this.readBraces()); }
     else if (/[A-Za-z_]/.test(c ?? '')) { while (/\w/.test(this.peek() ?? '')) this.pos++; }
     else if (/[0-9@*#?$!-]/.test(c ?? '')) this.pos++;
     else return '$';
     return this.src.slice(start, this.pos);
   }
 
+  // Inside ${...} and arithmetic, single quotes quote only in some contexts (not within double
+  // quotes or here-documents), so they are read as plain characters: every substitution bash
+  // might run is found, at the cost of reporting some it wouldn't.
   readBraces() {
     for (;;) {
       const c = this.peek();
       if (c === undefined) this.fail('unterminated ${');
       if (c === '}') { this.pos++; return; }
       if (c === '\\') this.pos += 2;
-      else if (c === "'") this.skipSingle();
       else if (c === '"') { this.pos++; this.readDouble(); }
       else if (c === '$') this.readDollar();
       else if (c === '`') this.readBacktick(false);
@@ -379,17 +416,10 @@ class Parser {
       if (c === '$') { this.readDollar(); continue; }
       if (c === '`') { this.readBacktick(false); continue; }
       if (c === '"') { this.pos++; this.readDouble(); continue; }
-      if (c === "'") { this.skipSingle(); continue; }
       if (c === '(') parens++;
       if (c === ')') parens--;
       this.pos++;
     }
-  }
-
-  skipSingle() {
-    const end = this.src.indexOf("'", this.pos + 1);
-    if (end < 0) this.fail('unterminated single quote');
-    this.pos = end + 1;
   }
 
   // `...`: backslash escapes $, ` and \ (and " inside double quotes); the rest is a command list.
@@ -403,6 +433,7 @@ class Parser {
       if (c === '\\' && (inDouble ? '$`\\"' : '$`\\').includes(this.peek(1) ?? ' ')) { body += this.peek(1); this.pos += 2; continue; }
       body += c; this.pos++;
     }
+    if (body.includes('\n') && this.heredocs.length) this.fail('a here-document is pending across a command substitution');
     new Parser(body, this.depth + 1, this.sink).parseList(null);
     return this.src.slice(start, this.pos);
   }
@@ -413,15 +444,24 @@ class Parser {
       const c = this.peek();
       if (c === undefined) this.fail("unterminated $'");
       this.pos++;
-      if (c === "'") return value;
+      if (c === "'") {
+        if (value.includes('\0')) this.fail("a NUL in $'...' cuts the word short");
+        return value;
+      }
       if (c !== '\\') { value += c; continue; }
       const next = this.peek();
       if (next !== undefined && Object.hasOwn(ANSI_C, next)) { value += ANSI_C[next]; this.pos++; continue; }
       const rest = this.src.slice(this.pos);
       const octal = /^[0-7]{1,3}/.exec(rest);
       const hex = /^x([0-9a-fA-F]{1,2})|^u([0-9a-fA-F]{1,4})|^U([0-9a-fA-F]{1,8})/.exec(rest);
-      if (octal) { value += String.fromCharCode(parseInt(octal[0], 8)); this.pos += octal[0].length; }
-      else if (hex) { value += String.fromCodePoint(parseInt(hex[1] ?? hex[2] ?? hex[3], 16)); this.pos += hex[0].length; }
+      // bash keeps the low byte of an octal escape: \516 is N.
+      if (octal) { value += String.fromCharCode(parseInt(octal[0], 8) & 0xff); this.pos += octal[0].length; }
+      else if (hex) {
+        const code = parseInt(hex[1] ?? hex[2] ?? hex[3], 16);
+        if (code > 0x10ffff) this.fail("an escape in $'...' past the last Unicode character");
+        value += String.fromCodePoint(code); this.pos += hex[0].length;
+      }
+      else if (next === 'c') this.fail("\\c in $'...' is not supported");
       else value += '\\';
     }
   }

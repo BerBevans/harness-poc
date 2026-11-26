@@ -1,6 +1,10 @@
 // Run with: node --test "workstation/claude/*.test.mjs"
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseShell, ShellParseError } from './shell-parse.mjs';
 
 // Each simple command as its words' values, in the order the parser found them (nested first).
@@ -12,8 +16,10 @@ const cases = [
   ['operators split commands', 'a 1 && b || c; d | e & f |& g', [['a', '1'], ['b'], ['c'], ['d'], ['e'], ['f'], ['g']]],
   ['quotes are removed', `git commit -m "fix it" -m 'two  words'`, [['git', 'commit', '-m', 'fix it', '-m', 'two  words']]],
   ['escapes and adjacent quoting join', `a\\ b "c\\"d"'e'f`, [['a b', 'c"def']]],
+  ["$'...' octal keeps the low byte, as bash does", `x $'\\516'`, [['x', 'N']]],
   ["$'...' is decoded", `x $'--no-veri\\x66y' $'\\55n' $'a\\tb'`, [['x', '--no-verify', '-n', 'a\tb']]],
   ['line continuations join', 'git \\\n  push', [['git', 'push']]],
+  ['a continuation after an operator', 'a &&\\\n b', [['a'], ['b']]],
   ['comments are dropped', 'a # b c\nd#e', [['a'], ['d#e']]],
   ['substitutions are commands too', 'echo $(git -c a=b commit) "$(x)" `y`', [['git', '-c', 'a=b', 'commit'], ['x'], ['y'], ['echo', '$(git -c a=b commit)', '$(x)', '`y`']]],
   ['nested substitutions', 'a $(b $(c) `d`)', [['c'], ['d'], ['b', '$(c)', '`d`'], ['a', '$(b $(c) `d`)']]],
@@ -30,6 +36,7 @@ const cases = [
   ['$"..." is a double-quoted string', 'echo $"a $x" $"b"', [['echo', 'a $x', 'b']]],
   ['assignments are not words', 'X=1 Y="a b" cmd arg', [['cmd', 'arg']]],
   ['array assignment', 'arr=(a $(b) c) cmd', [['b'], ['cmd']]],
+  ['array arguments to declare and local', 'declare -a x=(a $(b)); local y=(c)', [['b'], ['declare', '-a', 'x='], ['local', 'y=']]],
 ];
 
 for (const [name, src, expected] of cases) test(name, () => assert.deepEqual(argv(src), expected));
@@ -44,6 +51,12 @@ test('word flags: dynamic, glob, tilde, quoted', () => {
   assert.deepEqual([plain.dynamic, braces.dynamic, range.dynamic, at.dynamic, param.dynamic], [false, true, true, false, true]);
   assert.deepEqual([star.glob, plain.glob], [true, false]);
   assert.deepEqual([tilde.tilde, quotedTilde.tilde, quotedTilde.quoted], [true, false, true]);
+});
+
+test('more dynamic words: nested braces, $"..." and a tilde in an assignment', () => {
+  const [, nested, locale] = words('x {-a,-b{}} $"a"');
+  assert.deepEqual([nested.dynamic, locale.dynamic], [true, true]);
+  assert.equal(only('P=a:~/b x').assignments[0].value.tilde, true);
 });
 
 test('redirections', () => {
@@ -112,6 +125,51 @@ const errors = [
   ['a trailing backslash', 'echo \\'],
   ['a named coproc with a group body', 'coproc NAME { cat; }'],
   ['nesting past the depth limit', '$('.repeat(12) + 'x' + ')'.repeat(12)],
+  ['${...} nesting past the depth limit, before the stack runs out', 'x ' + '${x:-'.repeat(6000) + '}'.repeat(6000)],
+  ['a NUL byte', 'echo a\0b'],
+  ["a NUL from $'...', which cuts the word short in bash", "x $'-n\\0' $'a\\x0'"],
+  ["\\c in $'...'", "x $'\\cA'"],
+  ["an escape past the last Unicode character (a crash, before)", "x $'\\UFFFFFFFF'"],
+  ['a here-document opened inside a substitution and read outside it', "echo $(cat <<'X')\nx\nX"],
 ];
 
 for (const [name, src] of errors) test(`refuses ${name}`, () => assert.throws(() => parseShell(src), ShellParseError));
+
+// Checked against bash itself: bash runs the payload (a harmless echo) for every input, and the
+// parser must either see that command or throw. A clean parse that misses it is a bypass. Each
+// one was a bypass before the PR #101 review.
+const PAYLOAD = 'echo HIDDEN >&2';
+const bypasses = [
+  ['a continuation inside a reserved word', `if\\\n ${PAYLOAD}; then :; fi`],
+  ['a continuation inside an assignment name', `FOO\\\n_BAR=1 ${PAYLOAD}`],
+  ['a continuation inside a here-document delimiter', `cat >/dev/null <<EOF\nEO\\\nF\n${PAYLOAD}\nEOF\n`],
+  ['a continuation after $ in a here-document', `cat >/dev/null <<EOF\n$\\\n(${PAYLOAD})\nEOF`],
+  ['a continuation after $ in double quotes', `echo "$\\\n(${PAYLOAD})" >/dev/null`],
+  ['single quotes inside ${...} inside double quotes', `echo "\${x:-'$(${PAYLOAD})'}" >/dev/null`],
+  ['single quotes inside arithmetic', `echo $(( '$(${PAYLOAD})' )) 2>/dev/null`],
+  ['a named file descriptor', `{fd}>/dev/null ${PAYLOAD}`],
+  ['an array element assignment', `a[0]=x ${PAYLOAD}`],
+  ['a script name with () on the next line', './hid.sh\n() { :; }'],
+  ['a here-document pending across a substitution', `cat >/dev/null <<'X' $(true\n${PAYLOAD}\nX\n)`],
+  ['a process substitution inside [[', `[[ -n <(${PAYLOAD}) ]]`],
+];
+
+test('inputs bash runs are seen or refused', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'shell-parse-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'hid.sh'), `#!/bin/sh\n${PAYLOAD}\n`);
+  chmodSync(join(dir, 'hid.sh'), 0o755);
+  const runsPayload = command => {
+    const [first, second] = command.words.map(w => w.value);
+    return (first === 'echo' && second === 'HIDDEN') || first === './hid.sh';
+  };
+  for (const [name, src] of bypasses) {
+    await t.test(name, () => {
+      const bash = spawnSync('bash', ['-c', src], { cwd: dir, encoding: 'utf8' });
+      assert.match(bash.stderr, /HIDDEN/, 'bash should run the payload, or the case proves nothing');
+      let commands;
+      try { ({ commands } = parseShell(src)); } catch (error) { assert.ok(error instanceof ShellParseError); return; }
+      assert.ok(commands.some(runsPayload), 'the parser read it cleanly but missed the command');
+    });
+  }
+});
