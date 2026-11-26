@@ -23,14 +23,17 @@ const cases = [
   ['comments are dropped', 'a # b c\nd#e', [['a'], ['d#e']]],
   ['substitutions are commands too', 'echo $(git -c a=b commit) "$(x)" `y`', [['git', '-c', 'a=b', 'commit'], ['x'], ['y'], ['echo', '$(git -c a=b commit)', '$(x)', '`y`']]],
   ['nested substitutions', 'a $(b $(c) `d`)', [['c'], ['d'], ['b', '$(c)', '`d`'], ['a', '$(b $(c) `d`)']]],
-  ['substitutions in ${...} and arithmetic', 'echo ${x:-$(rm y)} $(( $(nproc) + 1 ))', [['rm', 'y'], ['nproc'], ['echo', '${x:-$(rm y)}', '$(( $(nproc) + 1 ))']]],
+  // Arithmetic text is also reported as commands (bash runs it as subshells when it isn't
+  // arithmetic), so these over-report: nproc twice, and the sum and loop clauses as commands.
+  ['substitutions in ${...} and arithmetic', 'echo ${x:-$(rm y)} $(( $(nproc) + 1 ))', [['rm', 'y'], ['nproc'], ['nproc'], ['$(nproc)', '+', '1'], ['echo', '${x:-$(rm y)}', '$(( $(nproc) + 1 ))']]],
   ['process substitution', 'diff <(sort a) >(cat)', [['sort', 'a'], ['cat'], ['diff', '<(sort a)', '>(cat)']]],
   ['if, while and reserved words', 'if [[ -f a && $b < c ]]; then x; elif y; then z; else w; fi; while ! q; do r; done', [['x'], ['y'], ['z'], ['w'], ['q'], ['r']]],
-  ['for lists and arithmetic for', 'for f in $(ls) b; do echo "$f"; done; for ((i=0;i<3;i++)); do :; done', [['ls'], ['echo', '$f'], [':']]],
+  ['for lists and arithmetic for', 'for f in $(ls) b; do echo "$f"; done; for ((i=0;i<3;i++)); do :; done', [['ls'], ['echo', '$f'], [], ['i'], ['i++'], [':']]],
   ['case patterns are not commands', 'case "$x" in a|b) one ;; (*) two ;; esac; three', [['one'], ['two'], ['three']]],
   ['substitutions in case words and patterns run', 'case $(w) in $(p)|x) a ;; esac', [['w'], ['p'], ['a']]],
   ['subshells and groups', '(cd sub; git push) && { a; b; } > log', [['cd', 'sub'], ['git', 'push'], ['a'], ['b'], []]],
   ['time and its -p', 'time -p git status', [['git', 'status']]],
+  ['time --', 'time -- a; time -p -- b', [['a'], ['b']]],
   ['until, select, ! and coproc', 'until a; do b; done; select x in y; do c; done; ! d | e; coproc f', [['a'], ['b'], ['c'], ['d'], ['e'], ['f']]],
   ['eval and exec keep their arguments as words', 'eval "git x"; exec git y', [['eval', 'git x'], ['exec', 'git', 'y']]],
   ['$"..." is a double-quoted string', 'echo $"a $x" $"b"', [['echo', 'a $x', 'b']]],
@@ -131,6 +134,11 @@ const errors = [
   ["\\c in $'...'", "x $'\\cA'"],
   ["an escape past the last Unicode character (a crash, before)", "x $'\\UFFFFFFFF'"],
   ['a here-document opened inside a substitution and read outside it', "echo $(cat <<'X')\nx\nX"],
+  ["single quotes inside ${...}, which move where it ends", "echo ${x:-'}'a}\\'"],
+  ['single quotes inside arithmetic', "echo $(( '))' a ))\\'"],
+  ['$[...] arithmetic', 'echo $[1<<2]\nb\n2]'],
+  ['an array subscript with a blank or operator', 'a[x y]=1 b'],
+  ['a line continuation joining two operators', 'a |\\\n& b'],
 ];
 
 for (const [name, src] of errors) test(`refuses ${name}`, () => assert.throws(() => parseShell(src), ShellParseError));
@@ -152,6 +160,16 @@ const bypasses = [
   ['a script name with () on the next line', './hid.sh\n() { :; }'],
   ['a here-document pending across a substitution', `cat >/dev/null <<'X' $(true\n${PAYLOAD}\nX\n)`],
   ['a process substitution inside [[', `[[ -n <(${PAYLOAD}) ]]`],
+  // Second review round.
+  ['single quotes inside an unquoted ${...}', `echo \${x:-'}'$(${PAYLOAD})}\\'`],
+  ['single quotes inside arithmetic, moving its end', `echo $(( '))' $(${PAYLOAD}) ))\\'`],
+  ['$[...] holding a here-document operator', `echo $[1<<2]\n${PAYLOAD}\n2]`],
+  ['a subscript bash reads across a blank', `a[x y]=1 ${PAYLOAD}`],
+  ['a subscript holding a here-document operator', `a[1<<2]=x\n${PAYLOAD}\n2]=x`],
+  ['time --', `time -p -- ${PAYLOAD}`],
+  // Found by mutation fuzzing: text that isn't arithmetic runs as nested subshells.
+  ['((...)) that is not arithmetic', `((${PAYLOAD}) )`],
+  ['$((...)) that is not arithmetic', `echo $((${PAYLOAD}) )`],
 ];
 
 test('inputs bash runs are seen or refused', async t => {

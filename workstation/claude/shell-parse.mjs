@@ -7,6 +7,17 @@
 
 export class ShellParseError extends Error {}
 
+// bash reads these as matched pairs, across blanks and operators. Each is either read the way
+// bash reads it or refused; a review should check any change against this list.
+//   '...' "..." $'...' $"..."    readWord, readDouble, readAnsiC
+//   `...` $(...) <(...) >(...)  readBacktick, substitution
+//   $((...)) ((...))             readArithmetic (quotes and backslashes inside are refused)
+//   ${...}                       readBraces (single quotes and backslashes inside are refused)
+//   $[...]                       refused
+//   name=(...)                   parseCommand, wordsUntil
+//   name[...]=                   readWord (a subscript holding a blank or operator is refused)
+//   extglob @(...) and the like  refused (an unexpected "(")
+
 const MAX_DEPTH = 8;
 const isMeta = c => c === undefined || ' \t\n;&|<>()'.includes(c);
 const PREFIX_WORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', 'time', 'coproc']);
@@ -34,6 +45,8 @@ export function parseShell(source) {
   // word, a quoted string or a here-document line changes what runs. Only continuations after a
   // blank or an operator are read; any other throws.
   if (/[^ \t;&|()]\\\n/.test(source)) throw new ShellParseError('a line continuation inside a word');
+  // One straight before an operator character can join two operators (| and & into |&).
+  if (/\\\n[&|;<>]/.test(source)) throw new ShellParseError('a line continuation inside an operator');
   const sink = { commands: [], functions: new Map() };
   try {
     new Parser(source, 0, sink).parseList(null);
@@ -160,7 +173,10 @@ class Parser {
       if (word === null) return false;
       if (PREFIX_WORDS.has(word)) {
         this.pos += word.length;
-        if (word === 'time') { this.skipBlanks(); if (this.atWord('-p')) this.pos += 2; }
+        if (word === 'time') {
+          this.skipBlanks(); if (this.atWord('-p')) this.pos += 2;
+          this.skipBlanks(); if (this.atWord('--')) this.pos += 2;
+        }
         continue;
       }
       if (word === '{') { this.pos++; this.groups.push({ fn: this.takeFunction(), start: this.sink.commands.length }); continue; }
@@ -350,6 +366,11 @@ class Parser {
       }
       if (c === '$') { const part = this.readDollar(); value += part; dynamic ||= part !== '$'; continue; }
       if (c === '`') { value += this.readBacktick(false); dynamic = true; continue; }
+      // A word starting name[ is read by bash to the matching ], blanks and operators included.
+      if (c === '[' && /^[A-Za-z_]\w*$/.test(this.src.slice(start, this.pos))) {
+        const close = this.src.indexOf(']', this.pos);
+        if (close < 0 || /[\s;&|<>()'"`\\]/.test(this.src.slice(this.pos + 1, close))) this.fail('an array subscript bash would read across blanks or operators');
+      }
       if ('*?['.includes(c)) glob = true;
       // Brace expansion ({a,b} or {1..3}) turns one word into several.
       if (c === '{' && brace < 0) brace = value.length;
@@ -382,40 +403,52 @@ class Parser {
     if (this.startsWith('((')) { this.pos += 2; this.nested(() => this.readArithmetic()); }
     else if (c === '(') { this.pos++; this.substitution(); }
     else if (c === '{') { this.pos++; this.nested(() => this.readBraces()); }
+    else if (c === '[') this.fail('$[...] arithmetic is not supported');
     else if (/[A-Za-z_]/.test(c ?? '')) { while (/\w/.test(this.peek() ?? '')) this.pos++; }
     else if (/[0-9@*#?$!-]/.test(c ?? '')) this.pos++;
     else return '$';
     return this.src.slice(start, this.pos);
   }
 
-  // Inside ${...} and arithmetic, single quotes quote only in some contexts (not within double
-  // quotes or here-documents), so they are read as plain characters: every substitution bash
-  // might run is found, at the cost of reporting some it wouldn't.
+  // Inside ${...} and arithmetic, single quotes quote in some contexts and not others (not
+  // within double quotes or here-documents), which moves where the construct ends, so they are
+  // refused, as are backslashes.
   readBraces() {
     for (;;) {
       const c = this.peek();
       if (c === undefined) this.fail('unterminated ${');
       if (c === '}') { this.pos++; return; }
-      if (c === '\\') this.pos += 2;
-      else if (c === '"') { this.pos++; this.readDouble(); }
+      if (c === "'" || c === '\\') this.fail(`a ${c} inside \${...}`);
+      if (c === '"') { this.pos++; this.readDouble(); }
       else if (c === '$') this.readDollar();
       else if (c === '`') this.readBacktick(false);
       else this.pos++;
     }
   }
 
+  // When the text of ((...)) or $((...)) is not valid arithmetic, bash reads it again as nested
+  // subshells, ( (...) ), and runs it. So the text is also parsed as commands, and any it holds
+  // are reported; a parse that fails is ignored, since the arithmetic reading has set the end.
   readArithmetic() {
+    const start = this.pos;
     let parens = 0;
     for (;;) {
       const c = this.peek();
       if (c === undefined) this.fail('unterminated arithmetic');
       if (c === ')' && parens === 0) {
         if (this.peek(1) !== ')') this.fail('unterminated arithmetic');
-        this.pos += 2; return;
+        this.pos += 2;
+        const asCommands = { commands: [], functions: new Map() };
+        try {
+          new Parser(this.src.slice(start, this.pos - 2), this.depth + 1, asCommands).parseList(null);
+          this.sink.commands.push(...asCommands.commands);
+        } catch { /* not commands either; bash would refuse it or read it as arithmetic */ }
+        return;
       }
       if (c === '$') { this.readDollar(); continue; }
       if (c === '`') { this.readBacktick(false); continue; }
       if (c === '"') { this.pos++; this.readDouble(); continue; }
+      if (c === "'" || c === '\\') this.fail(`a ${c} inside arithmetic`);
       if (c === '(') parens++;
       if (c === ')') parens--;
       this.pos++;
