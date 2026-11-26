@@ -12,7 +12,16 @@
     "allowUnsandboxedCommands": false,
     "autoAllowBashIfSandboxed": true,
     "filesystem": {
-      "denyRead": ["~/.ssh", "~/.aws", "~/.azure", "~/.claude/.credentials.json"],
+      "denyRead": [
+        "~/.ssh",
+        "~/.aws",
+        "~/.azure",
+        "~/.claude/.credentials.json",
+        "/mnt/c/Users/<windows-user>/.ssh",
+        "/mnt/c/Users/<windows-user>/.aws",
+        "/mnt/c/Users/<windows-user>/.azure",
+        "/mnt/c/Users/<windows-user>/.claude/.credentials.json"
+      ],
       "allowWrite": [
         "~/.npm",
         "~/.cache/agent-nuget",

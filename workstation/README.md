@@ -69,7 +69,7 @@ What the fragment does (each point was checked in a scratch run on 2026-11-26):
 - NuGet uses an agent-only cache, because NuGet doesn't re-check packages it has already extracted. A package tampered with in the shared cache would run in my own builds.
 - `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox.
 - The network goes through a proxy that allows only GitHub, NuGet (`api.nuget.org` is enough for restore) and npm. Add a host only when something needs it, and never a wildcard that covers hosts anyone can rent, such as `*.blob.core.windows.net`.
-- Reads are denied for credentials agents don't need: `~/.ssh`, `~/.aws`, `~/.azure` and Claude Code's own `~/.claude/.credentials.json`.
+- Reads are denied for credentials agents don't need: `.ssh`, `.aws`, `.azure` and Claude Code's own `.claude/.credentials.json`, in both the WSL and the Windows home (`/mnt/c` is readable from the sandbox).
 
 Accepted limits, while reads are otherwise open:
 
@@ -81,7 +81,7 @@ Containers: none in agent sessions. Docker's socket is blocked, and rootless Pod
 
 The twin repo is writable, so an agent could edit the twin's own profile. That's accepted for a personal repo.
 
-Test: `node --test "workstation/claude/*.test.mjs"` pins the fragment exactly, so widening it means changing the test too.
+Test: `node --test "workstation/claude/*.test.mjs"` pins the whole fragment, so any change, a new key included, means changing the test too. It checks the repo copy, not the installed settings: after editing either, merge by hand again.
 
 Install (WSL):
 
