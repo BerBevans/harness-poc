@@ -22,18 +22,23 @@ git config --global core.hooksPath "~/.config/git/hooks"
 
 ## claude/ - Claude Code PreToolUse hook
 
-`guard-git-hooks.mjs` stops the agent getting round the git hooks. It denies:
+`guard-git-hooks.mjs` stops the agent getting round the git hooks or reading the blocked-terms file. It parses Bash commands with `shell-parse.mjs`, so it judges what a command runs rather than what its text mentions: a note written through a quoted here-document is data, and a commit message may name a flag. It denies:
 
-- `--no-verify`, or `git commit -n` (including clusters like `-anm`)
-- any mention of `core.hooksPath`, including through `-c` and `GIT_CONFIG_*` variables
-- any access to the blocked-terms file, or to `GIT_BLOCKED_TERMS_FILE`
-- any tool touching `~/.config/git`, and writes to `~/.claude/hooks/` or `~/.gitconfig`
+- the skip-verification flag and any prefix git accepts for it, and `git commit -n` (including clusters like `-anm`), wherever git runs: behind wrappers, in functions, in `eval`, `bash -c` and `sh -c` strings, `git rebase --exec`, `git submodule foreach` and `git bisect run`, and in a here-document, `echo` or `printf` piped into a shell
+- git config keys that aren't on a short allowlist of harmless ones (`user.*`, `color.*`, `core.quotepath` and similar), through `-c`, `--config-env`, `clone --config`, `GIT_CONFIG_*` or a `git config` write; reading a value, `core.hooksPath` included, is allowed
+- changing `HOME`, `XDG_CONFIG_HOME`, `GIT_CONFIG*`, `GIT_EXEC_PATH`, `GIT_TEMPLATE_DIR`, `BASH_ENV` or `ENV` (by assignment, `export`, `env`, `unset` or `read`), and a `PATH` that puts a folder before the existing one
+- `alias` and `shopt -s expand_aliases`
+- writing any repository's `.git/config` by hand, and `cd` into a `.git` folder
+- any mention of the blocked-terms file or `GIT_BLOCKED_TERMS_FILE`, any path into `~/.config/git` or `~/.claude/hooks`, and a glob that could reach the terms file
+- code it can't see: a command name, `eval` string or git argument known only when it runs, a shell or interpreter reading its program from stdin it can't follow (`curl ... | sh`), `xargs` into git or a shell, and bash it can't parse
 
-Every denial tells the agent to stop and explain to the user rather than look for another way round. If the hook can't parse its input it denies (fail closed). In settings it's set to `onFailure: block`, so a missing `node` blocks tool calls rather than letting them through.
+Variables set once to a literal earlier in the same command (`S=/tmp/x; bash -c "ls $S"`) are worked out and checked by value. A variable used as a command name is allowed when every value it's given ends in a harmless program name. Code passed inline to an interpreter (`node -e`, `python -c`) and PowerShell get text rules.
+
+Every denial says what to do next: a command it couldn't see or parse can be written out plainly and retried; anything else means stop and tell the user. Any error in the hook is a denial (fail closed). In settings it's set to `onFailure: block`, so a missing `node` blocks tool calls rather than letting them through.
 
 Test: `node --test "workstation/claude/*.test.mjs"`
 
-Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settings.json`. Replace `<user>` with your user name, because the path must be absolute. A path that's left unchanged doesn't exist, and because the hook is set to `onFailure: block`, every tool call is then blocked. Run `echo $HOME` to get the right prefix.
+Install: copy `guard-git-hooks.mjs` and `shell-parse.mjs` to `~/.claude/hooks/` (the sandbox write-protects that folder, so do it from a terminal or `claude-admin`) and add this to `~/.claude/settings.json`. Replace `<user>` with your user name, because the path must be absolute. A path that's left unchanged doesn't exist, and because the hook is set to `onFailure: block`, every tool call is then blocked. Run `echo $HOME` to get the right prefix.
 
 ```json
 "hooks": {
@@ -56,7 +61,7 @@ Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settin
 
 ### Known limits
 
-The hook pattern-matches text, so it's fast feedback, not enforcement. It won't catch a bypass built at runtime, for example a script file that's written first and run afterwards, or a flag assembled from variables. The real backstops are `pre-push` and the planned CI scan. Like any hook, it also has no effect if hooks are disabled or the settings entry is removed. On WSL the sandbox below now enforces the file rules; the hook's rewrite will narrow it to what the sandbox can't see.
+The hook is a guard against accidents and casual bypasses, not a wall against a determined agent. It doesn't yet follow script files (`bash x.sh`, `source x`, `./x.sh`); that is the next change. It never checks script files run by an interpreter (`node x.mjs`, `python x.py`) or the commands a build runs (`npm test`, `make`, MSBuild targets). It can't see code bash evaluates from data (`x='a[$(cmd)]'` read from a file, then `$((x))`), a variable holding `;` and more commands inside a `bash -c` string, a script rewritten between the check and the run, or a recursive read of a folder above `~/.config/git`. The real backstops are `pre-push` and the planned CI scan. Like any hook, it also has no effect if hooks are disabled or the settings entry is removed. On WSL the sandbox below enforces the file rules.
 
 ## claude/sandbox-settings.json - Claude Code sandbox (WSL)
 

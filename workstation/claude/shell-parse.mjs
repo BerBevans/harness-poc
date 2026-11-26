@@ -212,7 +212,8 @@ class Parser {
       if (word === 'case') { this.pos += 4; this.caseClause(); return true; }
       if (word === '[[') { this.pos += 2; this.testClause(); return false; }
       if (word === 'function') { this.pos += 8; this.skipBlanks(); this.functionHeader(this.bareWord()); return true; }
-      if (/^[ \t]*\([ \t]*\)/.test(this.src.slice(this.pos + word.length))) { this.functionHeader(word); return true; }
+      // name() starts a function; a=() is an empty array, since a name can't hold "=".
+      if (!word.includes('=') && /^[ \t]*\([ \t]*\)/.test(this.src.slice(this.pos + word.length))) { this.functionHeader(word); return true; }
       return false;
     }
   }

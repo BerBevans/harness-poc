@@ -37,6 +37,7 @@ const cases = [
   ['$"..." is a double-quoted string', 'echo $"a $x" $"b"', [['echo', 'a $x', 'b']]],
   ['assignments are not words', 'X=1 Y="a b" cmd arg', [['cmd', 'arg']]],
   ['array assignment', 'arr=(a $(b) c) cmd', [['b'], ['cmd']]],
+  ['an empty array is not a function', 'a=(); a=(x $(b)); c', [[], ['b'], [], ['c']]],
   ['array arguments to declare and local', 'declare -a x=(a $(b)); local y=(c)', [['b'], ['declare', '-a', 'x='], ['local', 'y=']]],
 ];
 
