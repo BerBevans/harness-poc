@@ -1,0 +1,30 @@
+#!/bin/bash -l
+# Starts Claude Code only inside a git repository under ~/src. The sandbox always lets a session
+# write to its working folder, so a session started in a home folder could rewrite this launcher
+# or a shell profile, and one started in ~/src itself could plant hooks in every repository there.
+# For anything else, use claude-admin on Windows. Installed by hand; see workstation/README.md.
+set -u
+
+src=$(realpath -m "$HOME/src")
+here=$(realpath -e "$PWD") || { echo "claude: can't resolve the working folder." >&2; exit 1; }
+
+refuse() {
+  echo "claude: refusing to start in $here: $1." >&2
+  echo "claude: start it inside a git repository under $src, or use claude-admin on Windows." >&2
+  exit 1
+}
+
+case "$here/" in
+  "$src"/?*) ;;
+  *) refuse "it isn't inside $src" ;;
+esac
+case "$here/" in */.git/*) refuse "it is inside a .git folder" ;; esac
+
+dir=$here
+until [ -e "$dir/.git" ]; do
+  [ "$dir" = "$src" ] && refuse "it isn't inside a git repository"
+  dir=$(dirname "$dir")
+done
+[ "$dir" = "$src" ] && refuse "$src itself is a repository"
+
+exec "$HOME/.local/bin/claude" "$@"
