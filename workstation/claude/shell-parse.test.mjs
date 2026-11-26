@@ -23,12 +23,10 @@ const cases = [
   ['comments are dropped', 'a # b c\nd#e', [['a'], ['d#e']]],
   ['substitutions are commands too', 'echo $(git -c a=b commit) "$(x)" `y`', [['git', '-c', 'a=b', 'commit'], ['x'], ['y'], ['echo', '$(git -c a=b commit)', '$(x)', '`y`']]],
   ['nested substitutions', 'a $(b $(c) `d`)', [['c'], ['d'], ['b', '$(c)', '`d`'], ['a', '$(b $(c) `d`)']]],
-  // Arithmetic text is also reported as commands (bash runs it as subshells when it isn't
-  // arithmetic), so these over-report: nproc twice, and the sum and loop clauses as commands.
-  ['substitutions in ${...} and arithmetic', 'echo ${x:-$(rm y)} $(( $(nproc) + 1 ))', [['rm', 'y'], ['nproc'], ['nproc'], ['$(nproc)', '+', '1'], ['echo', '${x:-$(rm y)}', '$(( $(nproc) + 1 ))']]],
+  ['substitutions in ${...} and arithmetic', 'echo ${x:-$(rm y)} $(( $(nproc) + 1 ))', [['rm', 'y'], ['nproc'], ['echo', '${x:-$(rm y)}', '$(( $(nproc) + 1 ))']]],
   ['process substitution', 'diff <(sort a) >(cat)', [['sort', 'a'], ['cat'], ['diff', '<(sort a)', '>(cat)']]],
   ['if, while and reserved words', 'if [[ -f a && $b < c ]]; then x; elif y; then z; else w; fi; while ! q; do r; done', [['x'], ['y'], ['z'], ['w'], ['q'], ['r']]],
-  ['for lists and arithmetic for', 'for f in $(ls) b; do echo "$f"; done; for ((i=0;i<3;i++)); do :; done', [['ls'], ['echo', '$f'], [], ['i'], ['i++'], [':']]],
+  ['for lists and arithmetic for', 'for f in $(ls) b; do echo "$f"; done; for ((i=0;i<3;i++)); do :; done', [['ls'], ['echo', '$f'], [':']]],
   ['case patterns are not commands', 'case "$x" in a|b) one ;; (*) two ;; esac; three', [['one'], ['two'], ['three']]],
   ['substitutions in case words and patterns run', 'case $(w) in $(p)|x) a ;; esac', [['w'], ['p'], ['a']]],
   ['subshells and groups', '(cd sub; git push) && { a; b; } > log', [['cd', 'sub'], ['git', 'push'], ['a'], ['b'], []]],
@@ -143,10 +141,12 @@ const errors = [
 
 for (const [name, src] of errors) test(`refuses ${name}`, () => assert.throws(() => parseShell(src), ShellParseError));
 
-// Checked against bash itself: bash runs the payload (a harmless echo) for every input, and the
+// Checked against bash itself: bash runs the payload (a harmless printf) for every input, and the
 // parser must either see that command or throw. A clean parse that misses it is a bypass. Each
 // one was a bypass before the PR #101 review.
-const PAYLOAD = 'echo HIDDEN >&2';
+// Its marker appears only when it runs: bash's error messages quote the input (expanded and
+// quote-removed), so a marker written out in full could appear without anything running.
+const PAYLOAD = 'printf %s%s HID DEN >&2';
 const bypasses = [
   ['a continuation inside a reserved word', `if\\\n ${PAYLOAD}; then :; fi`],
   ['a continuation inside an assignment name', `FOO\\\n_BAR=1 ${PAYLOAD}`],
@@ -167,9 +167,11 @@ const bypasses = [
   ['a subscript bash reads across a blank', `a[x y]=1 ${PAYLOAD}`],
   ['a subscript holding a here-document operator', `a[1<<2]=x\n${PAYLOAD}\n2]=x`],
   ['time --', `time -p -- ${PAYLOAD}`],
-  // Found by mutation fuzzing: text that isn't arithmetic runs as nested subshells.
-  ['((...)) that is not arithmetic', `((${PAYLOAD}) )`],
-  ['$((...)) that is not arithmetic', `echo $((${PAYLOAD}) )`],
+  ['((...)) closed as a subshell', `((${PAYLOAD}) )`],
+  ['$((...)) closed as a substitution', `echo $((${PAYLOAD}) )`],
+  // Third review round: bash's own paren count decides whether $((...)) is arithmetic.
+  ['a case pattern inside $(( $(...) ))', `echo $(( $(case a in a) ;; esac) ; ${PAYLOAD} {fd}>/dev/null ))`],
+  ['a case pattern in backticks inside $((...))', `echo $(( \`case a in a) ;; esac\` ; ${PAYLOAD} {fd}>/dev/null ))`],
 ];
 
 test('inputs bash runs are seen or refused', async t => {
@@ -178,8 +180,8 @@ test('inputs bash runs are seen or refused', async t => {
   writeFileSync(join(dir, 'hid.sh'), `#!/bin/sh\n${PAYLOAD}\n`);
   chmodSync(join(dir, 'hid.sh'), 0o755);
   const runsPayload = command => {
-    const [first, second] = command.words.map(w => w.value);
-    return (first === 'echo' && second === 'HIDDEN') || first === './hid.sh';
+    const [first, , third] = command.words.map(w => w.value);
+    return (first === 'printf' && third === 'HID') || first === './hid.sh';
   };
   for (const [name, src] of bypasses) {
     await t.test(name, () => {

@@ -11,7 +11,8 @@ export class ShellParseError extends Error {}
 // bash reads it or refused; a review should check any change against this list.
 //   '...' "..." $'...' $"..."    readWord, readDouble, readAnsiC
 //   `...` $(...) <(...) >(...)  readBacktick, substitution
-//   $((...)) ((...))             readArithmetic (quotes and backslashes inside are refused)
+//   $((...)) ((...))             readArithmetic (quotes and backslashes inside are refused);
+//                                $((...)) that bash would run as commands is refused
 //   ${...}                       readBraces (single quotes and backslashes inside are refused)
 //   $[...]                       refused
 //   name=(...)                   parseCommand, wordsUntil
@@ -39,6 +40,22 @@ const REDIRECT = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)/;
  *   inside a compound that is piped into (echo x | (sh)) also show null.
  * @returns {{commands: SimpleCommand[], functions: Map<string, SimpleCommand[]>}}
  */
+// bash runs $((text)) as a command substitution, $( (text) ), when a plain scan of the text
+// (quotes and backslashes skipped, nothing else understood) finds a ")" with no "(" to match,
+// as a case pattern's ")" inside $(...) or backticks does.
+function bashReadsAsArithmetic(text) {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\') i++;
+    else if (c === "'") { i = text.indexOf("'", i + 1); if (i < 0) return false; }
+    else if (c === '"') { for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++; }
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth < 0) return false;
+  }
+  return true;
+}
+
 export function parseShell(source) {
   if (source.includes('\0')) throw new ShellParseError('the command contains a NUL byte');
   // bash removes a line continuation before it splits words, so one inside a word, a reserved
@@ -400,7 +417,12 @@ class Parser {
   readDollar() {
     const start = this.pos++;
     const c = this.peek();
-    if (this.startsWith('((')) { this.pos += 2; this.nested(() => this.readArithmetic()); }
+    if (this.startsWith('((')) {
+      this.pos += 2;
+      const from = this.pos;
+      this.nested(() => this.readArithmetic());
+      if (!bashReadsAsArithmetic(this.src.slice(from, this.pos - 2))) this.fail('$((...)) that bash would run as a command substitution');
+    }
     else if (c === '(') { this.pos++; this.substitution(); }
     else if (c === '{') { this.pos++; this.nested(() => this.readBraces()); }
     else if (c === '[') this.fail('$[...] arithmetic is not supported');
@@ -426,24 +448,14 @@ class Parser {
     }
   }
 
-  // When the text of ((...)) or $((...)) is not valid arithmetic, bash reads it again as nested
-  // subshells, ( (...) ), and runs it. So the text is also parsed as commands, and any it holds
-  // are reported; a parse that fails is ignored, since the arithmetic reading has set the end.
   readArithmetic() {
-    const start = this.pos;
     let parens = 0;
     for (;;) {
       const c = this.peek();
       if (c === undefined) this.fail('unterminated arithmetic');
       if (c === ')' && parens === 0) {
         if (this.peek(1) !== ')') this.fail('unterminated arithmetic');
-        this.pos += 2;
-        const asCommands = { commands: [], functions: new Map() };
-        try {
-          new Parser(this.src.slice(start, this.pos - 2), this.depth + 1, asCommands).parseList(null);
-          this.sink.commands.push(...asCommands.commands);
-        } catch { /* not commands either; bash would refuse it or read it as arithmetic */ }
-        return;
+        this.pos += 2; return;
       }
       if (c === '$') { this.readDollar(); continue; }
       if (c === '`') { this.readBacktick(false); continue; }
