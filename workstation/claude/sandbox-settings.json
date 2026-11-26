@@ -42,6 +42,7 @@
         "~/.config/environment.d",
         "~/.npm/_npx",
         "/mnt/c/Users/<windows-user>/.local/bin",
+        "/mnt/c/Users/<windows-user>/.claude.json",
         "/mnt/c/Users/<windows-user>/.claude/settings.json",
         "/mnt/c/Users/<windows-user>/.claude/settings.local.json",
         "/mnt/c/Users/<windows-user>/.claude/hooks",

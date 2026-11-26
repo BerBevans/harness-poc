@@ -32,14 +32,15 @@ const expected = {
       allowWrite: sorted(['~/.npm', '~/.cache/agent-nuget', ...twin]),
       // The git guardrails, and the hooks and config of every writable repo: a planted hook would
       // run unsandboxed the next time Ben uses git there. Then what runs unsandboxed at the next
-      // start: the launcher and the real binary, the login shell's profiles, claude-admin's binary,
-      // settings and hooks, PowerShell profiles (Documents may be redirected to OneDrive) and
-      // Windows Startup. The launcher's own folder check is the first line; these back it up.
+      // start, best effort: the launcher and the real binary, the login shell's files, systemd user
+      // units, npx's installs, claude-admin's binary, settings, MCP servers (.claude.json), hooks,
+      // plugins, agents, skills, commands and CLAUDE.md, PowerShell profiles (Documents may be
+      // redirected to OneDrive) and Windows Startup. The launcher's folder check is the control.
       denyWrite: sorted([
         '~/.gitconfig', '~/.config/git', ...[...twin, journal].flatMap(r => [`${r}/.git/hooks`, `${r}/.git/config`]),
         '~/.local/bin', '~/.local/share/claude', '~/.profile', '~/.bash_profile', '~/.bash_login', '~/.bashrc', '~/.bash_logout',
         '~/.config/systemd/user', '~/.config/environment.d', '~/.npm/_npx',
-        ...['.local/bin', ...['settings.json', 'settings.local.json', 'hooks', 'plugins', 'agents', 'skills', 'commands', 'CLAUDE.md'].map(p => `.claude/${p}`)]
+        ...['.local/bin', '.claude.json', ...['settings.json', 'settings.local.json', 'hooks', 'plugins', 'agents', 'skills', 'commands', 'CLAUDE.md'].map(p => `.claude/${p}`)]
           .map(p => `${win}/${p}`),
         ...['Documents', 'OneDrive/Documents'].flatMap(d => ['WindowsPowerShell', 'PowerShell'].map(p => `${win}/${d}/${p}`)),
         `${win}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`,
