@@ -75,7 +75,7 @@ What the fragment does (each point was checked in a scratch run on 2026-11-26):
 Accepted limits, while reads are otherwise open:
 
 - The global git hooks read the blocked-terms file from inside the sandbox, so the sandbox can't deny it. The hook above discourages reading it but doesn't enforce that: a command built at runtime can still read it, and GitHub is reachable.
-- `gh` needs its token, so `~/.config/gh` stays readable, and a command could send it to GitHub.
+- `gh` needs its token, so `~/.config/gh` stays readable, and a command could send it to GitHub. Git in WSL uses the same token for github.com (`gh auth setup-git --hostname github.com`), because the Windows credential manager is reached through WSL interop, which the sandbox blocks. The token is broad and doesn't expire, so the rulesets are what limit where agents can push. A fine-grained, expiring token for `gh` would narrow it.
 - `~/.npm` is shared because npm checks each package against its integrity hash when it reads the cache.
 
 Containers: none in agent sessions. Docker's socket is blocked, and rootless Podman can't map its user ids in the sandbox (`newuidmap` loses its setuid privileges). The container isolation test therefore skips locally and is required in CI: a local green run doesn't cover it. I run container work myself, or CI does.
