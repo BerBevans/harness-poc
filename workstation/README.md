@@ -60,23 +60,28 @@ The hook pattern-matches text, so it's fast feedback, not enforcement. It won't 
 
 ## claude/sandbox-settings.json - Claude Code sandbox (WSL)
 
-The hook reads command text; the sandbox enforces at the OS level. On WSL2, Claude Code runs every Bash command and its child processes (scripts, `node -e`, git, its hooks) under bubblewrap, so the file rules hold however a command is spelt. Native Windows has no sandbox, so Claude Code runs only in WSL: `failIfUnavailable` makes the native Windows install refuse to start, since `settings.json` is shared.
+The hook reads command text; the sandbox enforces at the OS level. On WSL2, Claude Code runs every Bash command and its child processes (scripts, `node -e`, git, its hooks) under bubblewrap, so the file rules hold however a command is spelt. `failIfUnavailable` stops a session starting without the sandbox. Native Windows has no sandbox, so Claude Code runs only in WSL (shim below). The Windows and WSL installs each have their own `settings.json`.
 
 What the fragment does (each point was checked in a scratch run on 2026-11-26):
 
 - Writes are allowed only in the working folder, `$TMPDIR`, the journal (an additional directory), the twin repo and the npm and agent NuGet caches. Everything else is read-only, `~/.config/git` and `~/.gitconfig` included. Claude Code also protects `~/.claude`, settings files and the working folder's `.git/hooks` and `.git/config` by itself.
 - The twin and journal repos are writable, so their `.git/hooks` and `.git/config` are denied explicitly: a planted hook would run unsandboxed the next time I use git there. Commits still work.
 - NuGet uses an agent-only cache, because NuGet doesn't re-check packages it has already extracted. A package tampered with in the shared cache would run in my own builds.
-- `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox. (A compound command that contains an excluded one runs sandboxed; only a plain matching command is excluded.)
-- The network goes through a proxy that allows only the listed hosts. Add a host only when something needs it.
+- `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox.
+- The network goes through a proxy that allows only GitHub, NuGet (`api.nuget.org` is enough for restore) and npm. Add a host only when something needs it, and never a wildcard that covers hosts anyone can rent, such as `*.blob.core.windows.net`.
+- Reads are denied for credentials agents don't need: `~/.ssh`, `~/.aws`, `~/.azure` and Claude Code's own `~/.claude/.credentials.json`.
 
-Reads stay open, because the global git hooks read the blocked-terms file from inside the sandbox. The hook above keeps that file away from the agent.
+Accepted limits, while reads are otherwise open:
+
+- The global git hooks read the blocked-terms file from inside the sandbox, so the sandbox can't deny it. The hook above discourages reading it but doesn't enforce that: a command built at runtime can still read it, and GitHub is reachable.
+- `gh` needs its token, so `~/.config/gh` stays readable, and a command could send it to GitHub.
+- `~/.npm` is shared because npm checks each package against its integrity hash when it reads the cache.
 
 Containers: none in agent sessions. Docker's socket is blocked, and rootless Podman can't map its user ids in the sandbox (`newuidmap` loses its setuid privileges). The container isolation test therefore skips locally and is required in CI: a local green run doesn't cover it. I run container work myself, or CI does.
 
 The twin repo is writable, so an agent could edit the twin's own profile. That's accepted for a personal repo.
 
-Test: `node --test "workstation/claude/*.test.mjs"` pins the fragment's safety settings.
+Test: `node --test "workstation/claude/*.test.mjs"` pins the fragment exactly, so widening it means changing the test too.
 
 Install (WSL):
 
@@ -85,9 +90,9 @@ sudo apt-get install -y bubblewrap socat
 mkdir -p ~/.npm ~/.cache/agent-nuget  # an allowWrite folder must exist before the session starts
 ```
 
-Merge the fragment into `~/.claude/settings.json` by hand, replacing `<user>` and `<windows-user>`, then restart Claude Code and check `/sandbox`.
+Back up `~/.claude/settings.json`, merge the fragment into it by hand, replacing `<user>` and `<windows-user>`, then restart Claude Code. `/sandbox` should show the sandbox as enabled, with no Dependencies tab, and in a session `touch ~/.gitconfig` must fail with "Read-only file system".
 
-On Windows, uninstall the native Claude Code and add a `claude` function to the PowerShell profile (`notepad $PROFILE`) that runs it in WSL through a login shell, so `~/.profile` applies:
+On Windows, uninstall the native Claude Code (`Get-Command claude` shows where it came from: winget, npm, or the native installer's `~\.local\bin\claude.exe`), and add a `claude` function to the PowerShell profile (`notepad $PROFILE`) that runs it in WSL through a login shell, so `~/.profile` applies:
 
 ```powershell
 function claude {

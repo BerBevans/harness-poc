@@ -12,6 +12,7 @@
     "allowUnsandboxedCommands": false,
     "autoAllowBashIfSandboxed": true,
     "filesystem": {
+      "denyRead": ["~/.ssh", "~/.aws", "~/.azure", "~/.claude/.credentials.json"],
       "allowWrite": [
         "~/.npm",
         "~/.cache/agent-nuget",
@@ -35,8 +36,6 @@
         "api.github.com",
         "*.githubusercontent.com",
         "api.nuget.org",
-        "www.nuget.org",
-        "*.blob.core.windows.net",
         "registry.npmjs.org"
       ]
     }
