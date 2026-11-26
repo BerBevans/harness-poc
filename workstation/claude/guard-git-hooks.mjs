@@ -274,7 +274,8 @@ function wordReason(word, ctx) {
 // whole source minus what the parser proves is data: literal commit messages and gh bodies,
 // quoted here-document bodies when every command is a plain file or git command
 // (DATA_COMMANDS), and a literal hooksPath key in a git config read. Nothing is blanked when
-// the command defines a function, which could make git or gh run its "message" as code. The
+// the command could change what git, gh or cat run: a function, eval, source, or a command
+// given as a path. The
 // terms and guarded-folder rules run over the whole source, data included.
 const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'printf', 'rm', 'mv', 'cp',
   'true', 'wc', 'head', 'tail', 'sort', 'diff', 'touch', 'test', '[', 'pwd']);
@@ -300,8 +301,12 @@ function floorReason(source, parsed, ctx) {
   const text = source.split('');
   const blank = (start, end) => { if (start !== null) for (let i = start; i < end; i++) if (text[i] !== '\n') text[i] = ' '; };
   const blankWord = w => w.start !== null && source.startsWith(w.raw, w.start) && blank(w.start, w.start + w.raw.length);
-  // git() { node -e "$3"; } would run a literal "message" as code.
-  const commands = parsed.functions.size ? [] : parsed.commands;
+  // Blanking trusts that git is git and cat is cat. A function (git() { node -e "$3"; }), eval,
+  // a sourced file, or a command given as a path (./git, ./cat) could each run the "data" as
+  // code, so then nothing is blanked.
+  const redefinable = parsed.functions.size > 0 || parsed.commands.some(c => c.words[0] &&
+    (c.words[0].dynamic || c.words[0].value.includes('/') || ['eval', 'source', '.'].includes(c.words[0].value)));
+  const commands = redefinable ? [] : parsed.commands;
   for (const command of commands) {
     const words = command.words;
     const name = words[0] ? commandName(words[0]) : '';

@@ -172,6 +172,10 @@ export const blocked = [
   ['a decoded -n taken as a message after a template cluster', "git commit -at -m $'-n' -m msg"],
   ['-n taken as a message after an abbreviated template', 'git commit --templ -m -n -m msg'],
   ['a git function running its message as node code', `git() { node -e "$3"; }; git commit -m 'require("child_process").execSync("git commit --no-verify -m x")'`],
+  ['a ./git script running its message', `./git commit -m "require('child_process').execSync('git commit --no-verify -m x')"`],
+  ['an eval-defined git function', `eval 'git(){ node -e "$3"; }'; git commit -m "require('child_process').execSync('git commit --no-verify -m x')"`],
+  ['a sourced file that could define git', `. ./w.sh; git commit -m "require('child_process').execSync('git commit --no-verify -m x')"`],
+  ['a here-document fed to ./cat', "./cat <<'EOF'\ngit commit --no-verify -m x\nEOF"],
   // Fail closed.
   ['bash the parser refuses', 'echo $[1+1]'],
 ];
