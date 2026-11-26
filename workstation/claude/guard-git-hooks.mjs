@@ -118,9 +118,28 @@ function hasUnquotedExpansion(raw) {
   }
   return false;
 }
-const isGitConfigPath = p => /(^|\/)\.git\/config$/.test(norm(p).replace(/\/(\.\/)+/g, '/').replace(/\/{2,}/g, '/'));
+// A path with "//", "." and ".." segments resolved, so .git/hooks/../config reads as .git/config.
+function cleanPath(p) {
+  const out = [];
+  for (const part of norm(p).split('/')) {
+    if (part === '.' || (part === '' && out.length)) continue;
+    if (part === '..' && out.length && out[out.length - 1] !== '..' && out[out.length - 1] !== '') out.pop();
+    else out.push(part);
+  }
+  return out.join('/');
+}
+const isGitConfigPath = p => /(^|\/)\.git\/config$/.test(cleanPath(p));
 // A .git folder as the target of cp, mv, install or ln, which would write files into it.
-const isGitDirPath = p => /(^|\/)\.git\/*$/.test(norm(p).replace(/\/(\.\/)+/g, '/'));
+const isGitDirPath = p => /(^|\/)\.git$/.test(cleanPath(p));
+// A path, glob or key=path word (dd of=, --target-directory=) that could name a .git/config
+// or a .git folder.
+function reachesGitConfig(word) {
+  const value = word.value.replace(/^-{0,2}[\w-]+=/, '');
+  if (isGitConfigPath(value)) return true;
+  if (!word.glob) return false;
+  const tail = cleanPath(value).split('/').slice(-2).join('/');
+  return globRegex(tail).test('.git/config');
+}
 
 // Every way a command might spell the home directory: C:/Users/x, /c/Users/x, ~, $HOME...
 function homeForms(home) {
@@ -152,8 +171,9 @@ const tokenise = s => s.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 function commitUsesShortNoVerify(text) {
   // Every git in every segment: git after a quote too, as in code passed to an interpreter
   // (execSync('git commit -n')), and after "=" as in an option value (-oProxyCommand=git ...).
-  const starts = [...text.split(/&&|\|\||[;|&\n]/)].flatMap(segment =>
-    [...segment.matchAll(/(?<=^|[\s(`'"=])(?:[^\s"'`=]*[/\\])?git(?:\.exe)?["']?(?:\\?\s)+/gi)]
+  // "&" isn't a separator: inside a quoted message ("a & b") it would cut off a later -n.
+  const starts = [...text.split(/&&|\|\||[;|\n]/)].flatMap(segment =>
+    [...segment.matchAll(/(?<=^|[\s(`'"=&])(?:[^\s"'`=]*[/\\])?git(?:\.exe)?["']?(?:\\?\s)+/gi)]
       .map(m => segment.slice(m.index + m[0].length).replace(/\\(\s)/g, '$1')));
   for (const rest of starts) {
     const tokens = tokenise(rest);
@@ -186,8 +206,7 @@ function isNoVerify(value) {
 }
 
 // A glob could expand to the terms file or the folder holding it.
-function globReaches(value, ctx) {
-  const pattern = expandHome(value, ctx.home);
+function globRegex(pattern) {
   let source = '';
   for (let i = 0; i < pattern.length; i++) {
     const c = pattern[i];
@@ -196,7 +215,12 @@ function globReaches(value, ctx) {
     else if (c === '[') { const end = pattern.indexOf(']', i + 1); if (end < 0) source += '\\['; else { source += `[${pattern.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`; i = end; } }
     else source += c.replace(/[.+^${}()|\\]/g, '\\$&');
   }
-  const regex = new RegExp(`^${source}$`);
+  return new RegExp(`^${source}$`);
+}
+
+function globReaches(value, ctx) {
+  const pattern = expandHome(value, ctx.home);
+  const regex = globRegex(pattern);
   const relative = !/^(\/|[a-z]:\/)/.test(pattern);
   return ctx.termsPaths.some(path => {
     if (!relative) return regex.test(path);
@@ -310,7 +334,9 @@ function variableFacts(source, commands, functions) {
     for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
   }
   // IFS changes how bash splits words, so a value with no blanks can still split into a flag.
-  const disabled = /\bIFS\b/.test(source) || commands.some(c => c.words[0] && ['source', '.', 'eval'].includes(c.words[0].value));
+  // The name is checked as bash reads it too (declare I"FS"=x, printf -v I"FS" x).
+  const disabled = /\bIFS\b/.test(source) || commands.some(c => c.words.some(w => /^IFS(\+?=|$)/.test(w.value)) ||
+    (c.words[0] && ['source', '.', 'eval'].includes(c.words[0].value)));
   // Functions that run their arguments as a command (t() { ...; "$@"; }): each call's
   // arguments are checked as that command.
   const forwarders = new Set([...functions].filter(([, body]) => body.some(isForward)).map(([name]) => name));
@@ -389,6 +415,15 @@ function harmlessCommandVariable(word, facts) {
   return raws.every(harmless);
 }
 
+// NAME=value as an argument (env, export, declare). The name is read from the value, as bash
+// passes it: export HO"ME"=x sets HOME. The raw value text is kept when the name is plain.
+function splitAssignment(word) {
+  const m = /^([A-Za-z_]\w*)\+?=/.exec(word.value);
+  if (!m) return null;
+  const raw = word.raw.startsWith(m[0]) ? word.raw.slice(m[0].length) : word.value.slice(m[0].length);
+  return { name: m[1], raw };
+}
+
 function envReason(name, value) {
   if (GUARDED_ENV.test(name)) return REASON.env(name);
   if (COMMAND_ENV.test(name)) {
@@ -437,7 +472,8 @@ function bashReason(source, ctx, nesting, outer = null) {
 }
 
 function commandReason(original, ctx, nesting, facts) {
-  const command = { ...original, words: original.words.map(w => resolveWord(w, facts)) };
+  const command = { ...original, words: original.words.map(w => resolveWord(w, facts)),
+    redirects: original.redirects.map(r => ({ ...r, target: resolveWord(r.target, facts) })) };
   const { words, assignments, redirects } = command;
   for (const { name, value } of assignments) {
     const raw = value.raw.slice(value.raw.indexOf('=') + 1);
@@ -448,7 +484,7 @@ function commandReason(original, ctx, nesting, facts) {
     const reason = wordReason(word, ctx);
     if (reason) return reason;
   }
-  if (redirects.some(r => WRITE_REDIRECTS.has(r.op) && isGitConfigPath(r.target.value))) return REASON.gitDir;
+  if (redirects.some(r => WRITE_REDIRECTS.has(r.op) && reachesGitConfig(r.target))) return REASON.gitDir;
 
   const start = commandStart(words);
   if (typeof start === 'string') return start;
@@ -498,8 +534,8 @@ function commandStart(words) {
         if (value === '-' || /^-[a-zA-Z]*i/.test(value) || value === '--ignore-environment') return REASON.env('the whole environment (env -i)');
         if (/^(-S|--split-string)/.test(value)) return REASON.unseen('env -S splits a string into a command');
         if ((value === '-u' || value === '--unset') && GUARDED_ENV.test(words[i + 1]?.value ?? '')) return REASON.env(words[i + 1].value);
-        const assignment = /^([A-Za-z_]\w*)=/.exec(words[i].raw);
-        if (assignment) { const reason = envReason(assignment[1], { raw: words[i].raw.slice(assignment[0].length) }); if (reason) return reason; i++; continue; }
+        const assignment = splitAssignment(words[i]);
+        if (assignment) { const reason = envReason(assignment.name, assignment); if (reason) return reason; i++; continue; }
       }
       if (name === 'flock' && (value === '-c' || value === '--command')) return REASON.unseen('flock -c runs a string as a command');
       if (!value.startsWith('-') || value === '-') break;
@@ -533,10 +569,10 @@ function startReason(command, start, ctx, nesting, facts) {
   if (['export', 'declare', 'typeset', 'local', 'readonly'].includes(name)) {
     if (name !== 'export' && values.some(v => /^-[a-zA-Z]*n/.test(v))) return REASON.unseen('a name reference (declare -n)');
     for (const word of args) {
-      const assignment = /^([A-Za-z_]\w*)\+?=/.exec(word.raw);
+      const assignment = splitAssignment(word);
       if (assignment) {
-        const raw = word.raw.slice(assignment[0].length);
-        const reason = envReason(assignment[1], { raw }) ?? (hidesArithmeticCode(raw) ? REASON.arithmeticData : null);
+        const { raw } = assignment;
+        const reason = envReason(assignment.name, assignment) ?? (hidesArithmeticCode(raw) ? REASON.arithmeticData : null);
         if (reason) return reason;
       } else if (word.dynamic) return REASON.unseen(`a variable name known only when it runs (${name})`);
     }
@@ -548,8 +584,9 @@ function startReason(command, start, ctx, nesting, facts) {
   if (name === 'cd' || name === 'pushd') {
     if (values.some(v => /(^|\/)\.git(\/|$)/.test(norm(v)))) return REASON.gitDir;
   }
-  if (!READERS.has(name) && values.some(isGitConfigPath)) return REASON.gitDir;
-  if (['cp', 'mv', 'install', 'ln', 'rsync'].includes(name) && values.some(isGitDirPath)) return REASON.gitDir;
+  if (!READERS.has(name) && args.some(reachesGitConfig)) return REASON.gitDir;
+  if (['cp', 'mv', 'install', 'ln', 'rsync'].includes(name) && values.some(v => isGitDirPath(v.replace(/^-{0,2}[\w-]+=/, '')))) return REASON.gitDir;
+  if (name === 'gh' && values[0] === 'alias' && ['set', 'import'].includes(values[1])) return REASON.alias;
   if (name === 'eval') {
     if (args.some(w => w.dynamic)) return REASON.unseen('eval of a string known only when it runs');
     return bashReason(values.join(' '), ctx, nesting + 1, facts);
@@ -683,17 +720,24 @@ function gitReason(args, ctx, nesting) {
     const strings = rest.slice(values.indexOf('foreach') + 1).filter(w => !w.value.startsWith('--'));
     for (const word of strings) { const reason = stringReason(word, ctx, nesting); if (reason) return reason; }
   }
-  // Options whose value is a command git runs through the shell.
-  const commandOpts = ['--exec', '--upload-pack', '--receive-pack', '--extcmd', '--sendmail-cmd', '--to-cmd', '--cc-cmd',
-    ...(name === 'rebase' || name === 'difftool' ? ['-x'] : []),
-    ...(['fetch', 'clone', 'pull', 'ls-remote'].includes(name) ? ['-u'] : [])];
+  // Options whose value is a command git runs through the shell, in every form git accepts:
+  // separate (--exec cmd), attached (--exec=cmd, -xcmd), clustered (-ix cmd) and abbreviated
+  // (--exe=cmd; git takes any unambiguous prefix).
+  const longOpts = ['--exec', '--upload-pack', '--receive-pack', '--extcmd', '--sendmail-cmd', '--to-cmd', '--cc-cmd', '--header-cmd'];
+  const shortOpt = name === 'rebase' || name === 'difftool' ? 'x' : ['clone', 'ls-remote'].includes(name) ? 'u' : name === 'grep' ? 'O' : null;
+  const tail = (word, n) => ({ ...word, value: word.value.slice(n), raw: word.raw.slice(n) });
   for (let j = 0; j < rest.length; j++) {
     const value = rest[j].value;
-    const long = commandOpts.find(o => o.startsWith('--') && value.startsWith(`${o}=`));
-    const code = commandOpts.includes(value) ? rest[j + 1]
-      : long ? { ...rest[j], value: value.slice(long.length + 1), raw: rest[j].raw.slice(long.length + 1) }
-      : name === 'grep' && /^-O.|^--open-files-in-pager=/.test(value) ? { ...rest[j], value: value.replace(/^-O|^--open-files-in-pager=/, ''), raw: rest[j].raw.replace(/^-O|^--open-files-in-pager=/, '') }
-      : null;
+    let code = null;
+    if (value.startsWith('--')) {
+      const option = value.split('=')[0];
+      const known = option.length >= 4 && longOpts.some(o => o.startsWith(option)) || /^--open-files-in-pager=/.test(value) && name === 'grep';
+      if (known) code = value.includes('=') ? tail(rest[j], option.length + 1) : rest[j + 1];
+    } else if (shortOpt && /^-[a-zA-Z]/.test(value) && value.includes(shortOpt)) {
+      const at = value.indexOf(shortOpt);
+      // grep -O alone opens the default pager; its command is only ever attached.
+      code = at < value.length - 1 ? tail(rest[j], at + 1) : shortOpt === 'O' ? null : rest[j + 1];
+    }
     if (code) { const reason = stringReason(code, ctx, nesting); if (reason) return reason; }
   }
   if (name === 'bisect' && values[0] === 'run') {
