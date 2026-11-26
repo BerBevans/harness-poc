@@ -64,8 +64,9 @@ The hook reads command text; the sandbox enforces at the OS level. On WSL2, Clau
 
 What the fragment does (each point was checked in a scratch run on 2026-11-26):
 
-- Writes are allowed only in the working folder, `$TMPDIR`, the journal (an additional directory), the twin repo and the npm and agent NuGet caches. Everything else is read-only, `~/.config/git` and `~/.gitconfig` included. Claude Code also protects `~/.claude`, settings files and the working folder's `.git/hooks` and `.git/config` by itself.
+- Writes are allowed only in the working folder (where the session started, fixed for the session), `$TMPDIR`, the journal (an additional directory), the twin repo and the npm and agent NuGet caches. Everything else is read-only, `~/.config/git` and `~/.gitconfig` included. Claude Code also protects `~/.claude`, settings files and the working folder's `.git/hooks` and `.git/config` by itself.
 - The twin and journal repos are writable, so their `.git/hooks` and `.git/config` are denied explicitly: a planted hook would run unsandboxed the next time I use git there. Commits still work.
+- What runs unsandboxed at the next start is denied too: `~/.local/bin` (the launcher), the PowerShell profile folders (with and without OneDrive's Documents redirect) and the Windows Startup folder. These back up the launcher's folder check.
 - NuGet uses an agent-only cache, because NuGet doesn't re-check packages it has already extracted. A package tampered with in the shared cache would run in my own builds.
 - `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox.
 - The network goes through a proxy that allows only GitHub, NuGet (`api.nuget.org` is enough for restore) and npm. Add a host only when something needs it, and never a wildcard that covers hosts anyone can rent, such as `*.blob.core.windows.net`.
@@ -92,11 +93,40 @@ mkdir -p ~/.npm ~/.cache/agent-nuget  # an allowWrite folder must exist before t
 
 Back up `~/.claude/settings.json`, merge the fragment into it by hand, replacing `<user>` and `<windows-user>`, then restart Claude Code. `/sandbox` should show the sandbox as enabled, with no Dependencies tab, and in a session `touch ~/.gitconfig` must fail with "Read-only file system".
 
-On Windows, uninstall the native Claude Code (`Get-Command claude` shows where it came from: winget, npm, or the native installer's `~\.local\bin\claude.exe`), and add a `claude` function to the PowerShell profile (`notepad $PROFILE`) that runs it in WSL through a login shell, so `~/.profile` applies:
+## claude/claude-wsl - the launcher
+
+The sandbox always lets a session write to the folder it started in. Started in `~`, a session could rewrite this launcher or a shell profile; started in the Windows home, the PowerShell profile; started in `~/src`, every repo's git hooks. So `claude-wsl` starts Claude only inside a git repository under `~/src`, after resolving symlinks, and refuses anywhere else (including inside a `.git` folder) with a message pointing at `claude-admin`. Both routes to Claude go through it: `claude` in a WSL shell and `claude` in PowerShell.
+
+`claude-admin` on Windows is the native Windows Claude Code, kept as an unsandboxed admin console for maintaining these controls only: manual permission mode, the guard hook installed, never used for coding.
+
+Install (in a WSL terminal outside Claude: a sandboxed session can't write these files, by design):
+
+```sh
+install -m 755 workstation/claude/claude-wsl ~/.local/bin/claude-wsl
+echo 'claude() { "$HOME/.local/bin/claude-wsl" "$@"; }' >> ~/.bashrc
+```
+
+Test: `claude-wsl.test.mjs` pins the allowed and refused folders.
+
+On Windows, add both functions to the PowerShell profile (`notepad $PROFILE`). `claude` passes the folder to WSL, mapping `\\wsl.localhost\<distro>\...` paths itself because `wsl.exe --cd` doesn't accept them, and uses `--exec` because Windows PowerShell 5.1 drops quotes embedded in arguments:
 
 ```powershell
+$global:ClaudeAdminPath = (Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+
 function claude {
     if ($PWD.Provider.Name -ne 'FileSystem') { Write-Error "claude: '$PWD' is not a folder WSL can open."; return }
-    wsl.exe --cd $PWD.ProviderPath -- bash -lc 'exec claude "$@"' claude @args
+    $dir = $PWD.ProviderPath
+    $distro = @()
+    if ($dir -match '^\\\\wsl(?:\.localhost|\$)\\(?<distro>[^\\]+)(?<path>\\.*)?$') {
+        $distro = @('-d', $Matches.distro)
+        $dir = if ($Matches.path) { $Matches.path -replace '\\', '/' } else { '/' }
+    }
+    wsl.exe @distro --cd $dir --exec /home/<user>/.local/bin/claude-wsl @args
+}
+
+function claude-admin {
+    if (-not $global:ClaudeAdminPath) { Write-Error 'claude-admin: native Claude Code not found.'; return }
+    Write-Host 'Native Windows Claude Code: UNSANDBOXED admin console.' -ForegroundColor Yellow
+    & $global:ClaudeAdminPath @args
 }
 ```

@@ -31,8 +31,15 @@ const expected = {
       denyRead: sorted(['~', win].flatMap(home => ['.ssh', '.aws', '.azure', '.claude/.credentials.json'].map(p => `${home}/${p}`))),
       allowWrite: sorted(['~/.npm', '~/.cache/agent-nuget', ...twin]),
       // The git guardrails, and the hooks and config of every writable repo: a planted hook would
-      // run unsandboxed the next time Ben uses git there.
-      denyWrite: sorted(['~/.gitconfig', '~/.config/git', ...[...twin, journal].flatMap(r => [`${r}/.git/hooks`, `${r}/.git/config`])]),
+      // run unsandboxed the next time Ben uses git there. Then what runs unsandboxed at the next
+      // start: the launcher, PowerShell profiles (Documents may be redirected to OneDrive) and
+      // Windows Startup. The launcher's own folder check is the first line; these back it up.
+      denyWrite: sorted([
+        '~/.gitconfig', '~/.config/git', ...[...twin, journal].flatMap(r => [`${r}/.git/hooks`, `${r}/.git/config`]),
+        '~/.local/bin',
+        ...['Documents', 'OneDrive/Documents'].flatMap(d => ['WindowsPowerShell', 'PowerShell'].map(p => `${win}/${d}/${p}`)),
+        `${win}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`,
+      ]),
     },
     // No unix sockets: Docker's daemon runs as root. No wildcards over hosts anyone can rent.
     network: {
