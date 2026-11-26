@@ -82,6 +82,28 @@ test('any quoting in the delimiter makes the here-document data', () => {
   }
 });
 
+test('words and here-document bodies record where they sit in the source', () => {
+  const sources = [
+    "cat > n.md <<'EOF'\nbody\nEOF\ngit commit -m 'msg x' -q",
+    'echo $(git commit -m "a b") `git log -1` "$(cat <<\'E\'\nhi\nE\n)"',
+    'cat <<X\n$(git status) `id`\nX',
+    'for f in a b; do echo "$f"; done; a=(x y); [[ $a == z ]]',
+  ];
+  for (const source of sources) {
+    for (const command of parseShell(source).commands) {
+      for (const word of [...command.words, ...command.assignments.map(a => a.value), ...command.redirects.map(r => r.target)]) {
+        assert.equal(source.slice(word.start, word.start + word.raw.length), word.raw, `${word.raw} in ${JSON.stringify(source)}`);
+      }
+      for (const { heredoc } of command.redirects.filter(r => r.heredoc)) {
+        assert.equal(source.slice(heredoc.start, heredoc.end), heredoc.body, JSON.stringify(source));
+      }
+    }
+  }
+  // A backtick body with escapes removed isn't a slice of the source, so its words have no position.
+  const inner = parseShell('echo `echo \\$HOME`').commands.find(c => c.words[1]?.raw === '$HOME');
+  assert.equal(inner.words[0].start, null);
+});
+
 test('file descriptor forms', () => {
   assert.deepEqual(only('exec 3>&- 4<&0 &> both').redirects.map(r => `${r.fd ?? ''}${r.op}${r.target.value}`), ['3>&-', '4<&0', '&>both']);
 });

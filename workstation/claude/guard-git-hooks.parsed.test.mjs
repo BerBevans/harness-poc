@@ -159,6 +159,19 @@ const blocked = [
   ['rebase -x in a cluster', "git rebase -ix 'git -c alias.x=y x' HEAD~1"],
   ['an abbreviated --exec', "git rebase --exe='git -c alias.x=y x' HEAD~1"],
   ['send-email --header-cmd', "git send-email --header-cmd='git -c alias.x=y x' a.patch"],
+  // The twin's fourth review: the floor reads the whole source, so text the parser reads past
+  // is still checked; quoted "$@" and "${a[@]}" split; quoted names and 3-letter prefixes.
+  ['a flag in an array element', 'a=(x --no-verify); git commit -m "${a[@]}"'],
+  ['a substitution in a for list used as arithmetic', "for x in 'a[$(git commit -n -qam y)]'; do (( x )); done"],
+  ['a substitution in a [[ ]] operand', "[[ 'a[$(git commit --no-verify -qam y)]' -eq 0 ]]"],
+  ['a hooksPath override in an array element', "a=('a[$(git -c core.hooksPath=/dev/null commit -qam y)]'); (( a ))"],
+  ['quoted "$@" after -m', 'set -- x -n; git commit -m "$@"'],
+  ['a quoted name changing a known variable', "X=-q; export X''=-n; git commit $X -am y"],
+  ['a quoted name changing a command variable', `g=true; export g''=git; "$g" commit -n -qam y`],
+  ['a quoted name changing a here-string variable', `S=true; export S''='g''it commit -n -qam y'; bash <<< "$S"`],
+  ['push --e=', "git push --e='g''it commit -n -qam y; git-receive-pack' ."],
+  ['clone --u=', "git clone --u='g''it commit -n -qam y' src dst"],
+  ['grep --op=', "git grep --op='g''it commit -n -qam y #' foo"],
   // Fail closed.
   ['bash the parser refuses', 'echo $[1+1]'],
 ];
@@ -202,6 +215,8 @@ const allowed = [
   ['an editor with an option', 'EDITOR="code --wait" git commit'],
   ['a note and a commit in one command', "cat > notes.md <<'EOF'\nNever use --no-verify.\nEOF\ngit add notes.md && git commit -m 'Add notes'"],
   ['fetch -m is not a message', 'git fetch -m origin'],
+  ['a twin log entry naming hooksPath, through a quoted here-document', "cat >> log.md <<'EOF'\n- `core.hooksPath` alone is not enough.\nEOF\ngit add log.md && git commit -qm 'Log it'"],
+  ['a commit message naming the flag through the here-document idiom', "git commit -m \"$(cat <<'EOF'\nExplain --no-verify\nEOF\n)\""],
   ['a quoted PATH append after export', 'export "PATH=$PATH:/x"'],
   ['an interactive rebase', 'git rebase -i --autosquash HEAD~3'],
   ['a rebase that runs tests', 'git rebase -x "dotnet test" HEAD~2'],

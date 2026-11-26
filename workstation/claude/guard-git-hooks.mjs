@@ -105,8 +105,10 @@ const commandName = word => norm(word.value).split('/').pop().replace(/\.exe$/, 
 // git-commit, git-config and the rest in git's exec path are git subcommands run directly.
 const isGit = name => name === 'git' || /^git-[a-z]/.test(name);
 const isUnsafe = name => XARGS_UNSAFE.has(name) || isGit(name);
-// A $ expansion outside double quotes, which bash splits into words.
+// An expansion bash can split into several words: any $ outside double quotes, and "$@",
+// "${a[@]}" and "${!a@}", which split even when quoted.
 function hasUnquotedExpansion(raw) {
+  if (/\$\{?@|\$\{!?\w+\[@\]|\$\{!\w*@\}/.test(raw)) return true;
   let quote = null;
   for (let i = 0; i < raw.length; i++) {
     const c = raw[i];
@@ -292,31 +294,28 @@ function floorReason(source, parsed, ctx) {
   // Quoted here-documents are data only when every command is one of these (awk, make or npm
   // could run what a here-document writes or pipes on).
   const dataOnly = parsed.commands.every(c => !c.words.length || (!c.words[0].dynamic && DATA_COMMANDS.has(commandName(c.words[0]))));
-  const lines = [];
+  // The whole source, with proven-data spans blanked: anything the parser reads past (array
+  // elements, for lists, [[ ]] operands, comments) stays in. Spans come from the parser's
+  // positions; a word without one (inside a backtick body with escapes) is never blanked.
+  const text = source.split('');
+  const blank = (start, end) => { if (start !== null) for (let i = start; i < end; i++) if (text[i] !== '\n') text[i] = ' '; };
+  const blankWord = w => w.start !== null && source.startsWith(w.raw, w.start) && blank(w.start, w.start + w.raw.length);
   for (const command of parsed.commands) {
     const words = command.words;
     const name = words[0] ? commandName(words[0]) : '';
     const sub = isGit(name) ? gitSubcommand(name, words) : null;
     const isConfigRead = sub?.name === 'config' && configReason(words.slice(sub.index + 1)) === null;
-    const kept = [];
+    // -m is a message only for these; elsewhere (fetch -m, rebase -m) it takes no value.
+    const opts = MESSAGE_OPTS[isGit(name) ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
-      if (isConfigRead && i > sub.index && /hookspath/i.test(w.value)) continue;
-      // -m is a message only for these; elsewhere (fetch -m, rebase -m) it takes no value.
-      const opts = MESSAGE_OPTS[isGit(name) ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
-      if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) { i++; continue; }
-      if (opts.some(o => o.length === 2 && w.value.startsWith(o) && w.value.length > 2) && !w.dynamic) continue;
-      if (opts.some(o => o.startsWith('--') && w.value.startsWith(`${o}=`)) && !w.dynamic) continue;
-      kept.push(w.raw);
+      if (isConfigRead && i > sub.index && /hookspath/i.test(w.value)) blankWord(w);
+      else if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) blankWord(words[++i]);
+      else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2) || (o.startsWith('--') && w.value.startsWith(`${o}=`)))) blankWord(w);
     }
-    for (const a of command.assignments) kept.push(a.value.raw);
-    for (const r of command.redirects) {
-      kept.push(r.target.raw);
-      if (r.heredoc && !(r.heredoc.quoted && dataOnly)) lines.push(...r.heredoc.body.split('\n'));
-    }
-    lines.push(kept.join(' '));
+    for (const r of command.redirects) if (r.heredoc?.quoted && dataOnly) blank(r.heredoc.start, r.heredoc.end);
   }
-  return textReason(lines.join('\n'), ctx);
+  return textReason(text.join(''), ctx);
 }
 
 // Variables assigned once, to a value the guard can work out, are substituted in later words,
@@ -329,6 +328,11 @@ function variableFacts(source, commands, functions) {
   // ${X:=v} assigns too, and unset makes a name unknown rather than empty.
   for (const m of source.matchAll(/(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*(?::?[-+*/%&|^]?=|\+\+|--)/g)) bump(m[1]);
   for (const m of source.matchAll(/\bunset\b([^;&|\n]*)/g)) for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
+  // export X''=v sets X, though the text shows no X=: a quoted name makes the name unknown.
+  for (const c of commands) for (const w of c.words) {
+    const m = /^([A-Za-z_]\w*)\+?=/.exec(w.value);
+    if (m && !w.raw.startsWith(m[0])) bump(m[1], 2);
+  }
   for (const m of source.matchAll(/\b(?:for|select)\s+([A-Za-z_]\w*)/g)) bump(m[1], 2);
   for (const m of source.matchAll(/\b(?:read|mapfile|readarray|getopts|printf\s+-v)\b([^;&|\n]*)/g)) {
     for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
@@ -731,7 +735,10 @@ function gitReason(args, ctx, nesting) {
     let code = null;
     if (value.startsWith('--')) {
       const option = value.split('=')[0];
-      const known = option.length >= 4 && longOpts.some(o => o.startsWith(option)) || /^--open-files-in-pager=/.test(value) && name === 'grep';
+      // Any prefix git could accept (--e for push --exec); an ambiguous one makes git fail.
+      // grep's pager option takes a command only attached with "=".
+      const known = option.length >= 3 && (longOpts.some(o => o.startsWith(option)) ||
+        (name === 'grep' && value.includes('=') && '--open-files-in-pager'.startsWith(option)));
       if (known) code = value.includes('=') ? tail(rest[j], option.length + 1) : rest[j + 1];
     } else if (shortOpt && /^-[a-zA-Z]/.test(value) && value.includes(shortOpt)) {
       const at = value.indexOf(shortOpt);

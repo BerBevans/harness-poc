@@ -32,10 +32,13 @@ const ASSIGNMENT = /^([A-Za-z_]\w*)(?:\[[^\]]*\])?\+?=/;
 const REDIRECT = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)/;
 
 /**
- * @typedef {{raw: string, value: string, dynamic: boolean, glob: boolean, tilde: boolean, quoted: boolean}} Word
+ * @typedef {{raw: string, value: string, dynamic: boolean, glob: boolean, tilde: boolean, quoted: boolean, start: number|null}} Word
  *   value is the word after quote removal and $'...' decoding; dynamic means it holds an
- *   expansion or substitution, so value is not what bash will pass.
- * @typedef {{fd: number|null, op: string, target: Word, heredoc: {body: string, quoted: boolean}|null}} Redirect
+ *   expansion or substitution, so value is not what bash will pass. start is where raw begins
+ *   in the source, or null inside a backtick body that had escapes removed.
+ * @typedef {{fd: number|null, op: string, target: Word,
+ *   heredoc: {body: string, quoted: boolean, start: number|null, end: number|null}|null}} Redirect
+ *   A here-document's start and end span its body in the source.
  * @typedef {{assignments: {name: string, value: Word}[], words: Word[], redirects: Redirect[],
  *   pipedFrom: SimpleCommand|'compound'|null}} SimpleCommand
  *   pipedFrom is the command whose output a pipe feeds into this one's stdin, or 'compound'
@@ -85,10 +88,13 @@ export function parseShell(source) {
 }
 
 class Parser {
-  constructor(src, depth, sink) {
+  // base: where src starts in the top-level source, or null when src isn't a verbatim slice of
+  // it (a backtick body with escapes removed); words then carry no position.
+  constructor(src, depth, sink, base = 0) {
     if (depth > MAX_DEPTH) throw new ShellParseError(`the command nests more than ${MAX_DEPTH} levels deep`);
-    Object.assign(this, { src, depth, sink, pos: 0, heredocs: [], groups: [], pendingFunction: null, heredocFloor: 0 });
+    Object.assign(this, { src, depth, sink, base, pos: 0, heredocs: [], groups: [], pendingFunction: null, heredocFloor: 0 });
   }
+  at(pos) { return this.base === null ? null : this.base + pos; }
 
   fail(message) { throw new ShellParseError(`${message} (at character ${this.pos})`); }
   peek(n = 0) { return this.src[this.pos + n]; }
@@ -334,11 +340,13 @@ class Parser {
   readHeredocs() {
     for (const redirect of this.heredocs.splice(0)) {
       const delimiter = redirect.target.value;
-      const lines = [];
+      const lines = [], bodyStart = this.pos;
+      let bodyEnd = this.pos;
       for (;;) {
         if (this.pos >= this.src.length) this.fail(`here-document ${delimiter} not terminated`);
         const end = this.src.indexOf('\n', this.pos) < 0 ? this.src.length : this.src.indexOf('\n', this.pos);
         let line = this.src.slice(this.pos, end);
+        bodyEnd = this.pos;
         this.pos = Math.min(end + 1, this.src.length);
         if (redirect.op === '<<-') line = line.replace(/^\t+/, '');
         if (line === delimiter) break;
@@ -346,9 +354,12 @@ class Parser {
         lines.push(line);
       }
       const body = lines.map(line => `${line}\n`).join('');
-      redirect.heredoc = { body, quoted: redirect.target.quoted };
-      // An unquoted here-document expands $(...) and backticks when the command runs.
-      if (!redirect.target.quoted) new Parser(body, this.depth + 1, this.sink).scanExpansions();
+      // start/end: the body's span in the top-level source (tabs included for <<-), or null.
+      redirect.heredoc = { body, quoted: redirect.target.quoted, start: this.at(bodyStart), end: this.at(bodyEnd) };
+      // An unquoted here-document expands $(...) and backticks when the command runs. With <<-
+      // the body loses its tabs, so it is no longer a verbatim slice.
+      const base = redirect.op === '<<-' ? null : this.at(bodyStart);
+      if (!redirect.target.quoted) new Parser(body, this.depth + 1, this.sink, base).scanExpansions();
     }
   }
 
@@ -405,7 +416,7 @@ class Parser {
       value += c; this.pos++;
     }
     if (this.pos === start) return null;
-    return { raw: this.src.slice(start, this.pos), value, dynamic, glob, tilde, quoted };
+    return { raw: this.src.slice(start, this.pos), value, dynamic, glob, tilde, quoted, start: this.at(start) };
   }
 
   readDouble() {
@@ -489,7 +500,8 @@ class Parser {
       body += c; this.pos++;
     }
     if (body.includes('\n') && this.heredocs.length) this.fail('a here-document is pending across a command substitution');
-    new Parser(body, this.depth + 1, this.sink).parseList(null);
+    const verbatim = body === this.src.slice(start + 1, this.pos - 1);
+    new Parser(body, this.depth + 1, this.sink, verbatim ? this.at(start + 1) : null).parseList(null);
     return this.src.slice(start, this.pos);
   }
 
