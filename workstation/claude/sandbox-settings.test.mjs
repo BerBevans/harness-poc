@@ -37,8 +37,10 @@ const expected = {
       // Windows Startup. The launcher's own folder check is the first line; these back it up.
       denyWrite: sorted([
         '~/.gitconfig', '~/.config/git', ...[...twin, journal].flatMap(r => [`${r}/.git/hooks`, `${r}/.git/config`]),
-        '~/.local/bin', '~/.local/share/claude', '~/.profile', '~/.bash_profile', '~/.bash_login', '~/.bashrc',
-        ...['.local/bin', '.claude/settings.json', '.claude/settings.local.json', '.claude/hooks'].map(p => `${win}/${p}`),
+        '~/.local/bin', '~/.local/share/claude', '~/.profile', '~/.bash_profile', '~/.bash_login', '~/.bashrc', '~/.bash_logout',
+        '~/.config/systemd/user', '~/.config/environment.d', '~/.npm/_npx',
+        ...['.local/bin', ...['settings.json', 'settings.local.json', 'hooks', 'plugins', 'agents', 'skills', 'commands', 'CLAUDE.md'].map(p => `.claude/${p}`)]
+          .map(p => `${win}/${p}`),
         ...['Documents', 'OneDrive/Documents'].flatMap(d => ['WindowsPowerShell', 'PowerShell'].map(p => `${win}/${d}/${p}`)),
         `${win}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup`,
       ]),
