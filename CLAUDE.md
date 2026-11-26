@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Strictness tier: Enterprise practice.
+
 Working notes for sessions in the harness repo. The design is `docs/decisions.md`; the hooks and CI checks are in `docs/hooks.md`.
 
 ## Releasing
