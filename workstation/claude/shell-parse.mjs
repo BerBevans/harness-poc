@@ -4,6 +4,9 @@
 // returns every simple command it finds, at any depth (inside $(...), backticks, <(...),
 // unquoted here-documents, subshells, groups, loops and function bodies), so a caller never has
 // to walk a tree. Anything it can't read throws ShellParseError, and the guard then denies.
+// Known limit: bash evaluates arithmetic and array subscripts in data, so x='a[$(cmd)]' then
+// $((x)), [[ $x -eq 0 ]] and the like run cmd from a quoted string or a file. That is invisible
+// to any parser; the guard has to judge such words (and server-side CI is the backstop).
 
 export class ShellParseError extends Error {}
 
@@ -40,20 +43,26 @@ const REDIRECT = /^(\d*)(&>>|&>|<<<|<<-|<<|<>|<&|>>|>&|>\||<|>)/;
  *   inside a compound that is piped into (echo x | (sh)) also show null.
  * @returns {{commands: SimpleCommand[], functions: Map<string, SimpleCommand[]>}}
  */
-// bash runs $((text)) as a command substitution, $( (text) ), when a plain scan of the text
-// (quotes and backslashes skipped, nothing else understood) finds a ")" with no "(" to match,
-// as a case pattern's ")" inside $(...) or backticks does.
+// bash runs $((text)) as a command substitution, $( (text) ), unless a plain scan of the text
+// (quotes and backslashes skipped, nothing else understood) finds its parens balanced. A case
+// pattern's ")" or a commented "(" inside $(...) or backticks unbalances them. bash's quote
+// skipping understands substitutions inside double quotes and this scan doesn't, so a double-
+// quoted span holding one is refused rather than guessed at.
 function bashReadsAsArithmetic(text) {
   let depth = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (c === '\\') i++;
     else if (c === "'") { i = text.indexOf("'", i + 1); if (i < 0) return false; }
-    else if (c === '"') { for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++; }
+    else if (c === '"') {
+      const from = i;
+      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === '\\') i++;
+      if (/\$\(|\$\{|`/.test(text.slice(from, i))) return false;
+    }
     else if (c === '(') depth++;
     else if (c === ')' && --depth < 0) return false;
   }
-  return true;
+  return depth === 0;
 }
 
 export function parseShell(source) {

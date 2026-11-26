@@ -132,6 +132,8 @@ const errors = [
   ["\\c in $'...'", "x $'\\cA'"],
   ["an escape past the last Unicode character (a crash, before)", "x $'\\UFFFFFFFF'"],
   ['a here-document opened inside a substitution and read outside it', "echo $(cat <<'X')\nx\nX"],
+  ['a commented "(" in $(...) inside $((...))', 'echo $(( $(: # (\n) ; b ))'],
+  ['a substitution inside double quotes inside $((...))', 'echo $(( "$(b)" + 1 ))'],
   ["single quotes inside ${...}, which move where it ends", "echo ${x:-'}'a}\\'"],
   ['single quotes inside arithmetic', "echo $(( '))' a ))\\'"],
   ['$[...] arithmetic', 'echo $[1<<2]\nb\n2]'],
@@ -172,6 +174,9 @@ const bypasses = [
   // Third review round: bash's own paren count decides whether $((...)) is arithmetic.
   ['a case pattern inside $(( $(...) ))', `echo $(( $(case a in a) ;; esac) ; ${PAYLOAD} {fd}>/dev/null ))`],
   ['a case pattern in backticks inside $((...))', `echo $(( \`case a in a) ;; esac\` ; ${PAYLOAD} {fd}>/dev/null ))`],
+  // Fourth review round: bash's count also needs to end at zero, and skips substitutions in "...".
+  ['a double-quoted "(" bash does not count', `echo $(( "$(: "(")" + $(case a in a) ;; esac) ; ${PAYLOAD} ))`],
+  ['a commented "(" in backticks inside $((...))', `echo $(( \`: # (\` ; ${PAYLOAD} ))`],
 ];
 
 test('inputs bash runs are seen or refused', async t => {
