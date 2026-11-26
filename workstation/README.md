@@ -56,4 +56,42 @@ Install: copy the script to `~/.claude/hooks/` and add this to `~/.claude/settin
 
 ### Known limits
 
-The hook pattern-matches text, so it's fast feedback, not enforcement. It won't catch a bypass built at runtime, for example a script file that's written first and run afterwards, or a flag assembled from variables. The real backstops are `pre-push` and the planned CI scan. Like any hook, it also has no effect if hooks are disabled or the settings entry is removed.
+The hook pattern-matches text, so it's fast feedback, not enforcement. It won't catch a bypass built at runtime, for example a script file that's written first and run afterwards, or a flag assembled from variables. The real backstops are `pre-push` and the planned CI scan. Like any hook, it also has no effect if hooks are disabled or the settings entry is removed. On WSL the sandbox below now enforces the file rules; the hook's rewrite will narrow it to what the sandbox can't see.
+
+## claude/sandbox-settings.json - Claude Code sandbox (WSL)
+
+The hook reads command text; the sandbox enforces at the OS level. On WSL2, Claude Code runs every Bash command and its child processes (scripts, `node -e`, git, its hooks) under bubblewrap, so the file rules hold however a command is spelt. Native Windows has no sandbox, so Claude Code runs only in WSL: `failIfUnavailable` makes the native Windows install refuse to start, since `settings.json` is shared.
+
+What the fragment does (each point was checked in a scratch run on 2026-11-26):
+
+- Writes are allowed only in the working folder, `$TMPDIR`, the journal (an additional directory), the twin repo and the npm and agent NuGet caches. Everything else is read-only, `~/.config/git` and `~/.gitconfig` included. Claude Code also protects `~/.claude`, settings files and the working folder's `.git/hooks` and `.git/config` by itself.
+- The twin and journal repos are writable, so their `.git/hooks` and `.git/config` are denied explicitly: a planted hook would run unsandboxed the next time I use git there. Commits still work.
+- NuGet uses an agent-only cache, because NuGet doesn't re-check packages it has already extracted. A package tampered with in the shared cache would run in my own builds.
+- `allowUnsandboxedCommands: false` closes the `dangerouslyDisableSandbox` escape hatch. There are no `excludedCommands`. An excluded command runs with full access, and Docker's daemon runs as root, so excluding `docker` would undo the sandbox. (A compound command that contains an excluded one runs sandboxed; only a plain matching command is excluded.)
+- The network goes through a proxy that allows only the listed hosts. Add a host only when something needs it.
+
+Reads stay open, because the global git hooks read the blocked-terms file from inside the sandbox. The hook above keeps that file away from the agent.
+
+Containers: none in agent sessions. Docker's socket is blocked, and rootless Podman can't map its user ids in the sandbox (`newuidmap` loses its setuid privileges). The container isolation test therefore skips locally and is required in CI: a local green run doesn't cover it. I run container work myself, or CI does.
+
+The twin repo is writable, so an agent could edit the twin's own profile. That's accepted for a personal repo.
+
+Test: `node --test "workstation/claude/*.test.mjs"` pins the fragment's safety settings.
+
+Install (WSL):
+
+```sh
+sudo apt-get install -y bubblewrap socat
+mkdir -p ~/.npm ~/.cache/agent-nuget  # an allowWrite folder must exist before the session starts
+```
+
+Merge the fragment into `~/.claude/settings.json` by hand, replacing `<user>` and `<windows-user>`, then restart Claude Code and check `/sandbox`.
+
+On Windows, uninstall the native Claude Code and add a `claude` function to the PowerShell profile (`notepad $PROFILE`) that runs it in WSL through a login shell, so `~/.profile` applies:
+
+```powershell
+function claude {
+    if ($PWD.Provider.Name -ne 'FileSystem') { Write-Error "claude: '$PWD' is not a folder WSL can open."; return }
+    wsl.exe --cd $PWD.ProviderPath -- bash -lc 'exec claude "$@"' claude @args
+}
+```
