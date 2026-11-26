@@ -6,9 +6,10 @@
 // Bash commands are parsed (shell-parse.mjs), so the rules judge what a command does, not
 // what its text mentions: a note written through a quoted here-document is data. Code the
 // guard can't see (a command name or eval string known only when it runs, a shell reading
-// stdin from something it can't follow) is denied, and so is bash it can't parse. PowerShell
-// and code passed inline to an interpreter (node -e, python -c) get text rules. Script files
-// run by an interpreter are not checked; pre-push and CI are the backstops.
+// stdin from something it can't follow) is denied, and so is bash it can't parse. Under that,
+// the old text rules run as a floor (floorReason), so the guard is never weaker than the
+// pattern-matching one it replaced. PowerShell gets the text rules alone. Script files run by
+// an interpreter are not checked; pre-push and CI are the backstops.
 //
 // Allows by printing nothing; denies by printing a PreToolUse permission decision.
 // Fails closed: unreadable input, or any error in the hook, is denied.
@@ -62,16 +63,20 @@ const VALUE_OPTS = {
 
 // The -c / --config-env / GIT_CONFIG_* / git config write allowlist. Anything else is denied,
 // so a key that changes which hooks run fails loudly even if nobody listed it.
-const HARMLESS_KEYS = new Set(['user.name', 'user.email', 'user.signingkey', 'core.quotepath', 'core.pager',
-  'core.autocrlf', 'core.safecrlf', 'core.excludesfile', 'core.longpaths', 'core.filemode', 'core.ignorecase', 'core.editor',
+// Not core.editor, core.pager or pager.*: their values are commands git runs.
+const HARMLESS_KEYS = new Set(['user.name', 'user.email', 'user.signingkey', 'core.quotepath',
+  'core.autocrlf', 'core.safecrlf', 'core.excludesfile', 'core.longpaths', 'core.filemode', 'core.ignorecase',
   'init.defaultbranch', 'commit.gpgsign', 'tag.gpgsign', 'push.default', 'push.autosetupremote', 'pull.rebase',
   'pull.ff', 'merge.conflictstyle', 'fetch.prune', 'diff.noprefix', 'log.showsignature', 'safe.directory',
   'gc.auto', 'maintenance.auto', 'protocol.version']);
-const HARMLESS_SECTIONS = ['color.', 'advice.', 'pager.'];
+const HARMLESS_SECTIONS = ['color.', 'advice.'];
 const harmlessKey = key => HARMLESS_KEYS.has(key.toLowerCase()) || HARMLESS_SECTIONS.some(s => key.toLowerCase().startsWith(s));
 
 // Variables that change which git config, hooks or start-up code apply.
-const GUARDED_ENV = /^(GIT_CONFIG\w*|HOME|XDG_CONFIG_HOME|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|BASH_ENV|ENV|GIT_BLOCKED_TERMS_FILE)$/;
+const GUARDED_ENV = /^(GIT_CONFIG\w*|HOME|XDG_CONFIG_HOME|GIT_EXEC_PATH|GIT_TEMPLATE_DIR|GIT_DIR|GIT_COMMON_DIR|BASH_ENV|ENV|GIT_BLOCKED_TERMS_FILE)$/;
+
+// Variables whose value is a command git runs: allowed only as a plain program name (GIT_EDITOR=true).
+const COMMAND_ENV = /^(GIT_EDITOR|GIT_SEQUENCE_EDITOR|GIT_PAGER|GIT_SSH_COMMAND|EDITOR|VISUAL|PAGER)$/;
 
 const SHELLS = new Set(['bash', 'sh', 'dash', 'zsh', 'ksh', 'mksh', 'ash', 'fish']);
 const POWERSHELLS = new Set(['pwsh', 'powershell']);
@@ -97,6 +102,22 @@ const READERS = new Set(['cat', 'head', 'tail', 'less', 'more', 'grep', 'rg', 'w
 
 const norm = p => String(p).replace(/\\/g, '/').toLowerCase();
 const commandName = word => norm(word.value).split('/').pop().replace(/\.exe$/, '');
+// git-commit, git-config and the rest in git's exec path are git subcommands run directly.
+const isGit = name => name === 'git' || /^git-[a-z]/.test(name);
+const isUnsafe = name => XARGS_UNSAFE.has(name) || isGit(name);
+// A $ expansion outside double quotes, which bash splits into words.
+function hasUnquotedExpansion(raw) {
+  let quote = null;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quote === "'") { if (c === "'") quote = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '"') quote = quote ? null : '"';
+    else if (c === "'" && !quote) quote = "'";
+    else if (!quote && (c === '$' || c === '`')) return true;
+  }
+  return false;
+}
 const isGitConfigPath = p => /(^|\/)\.git\/config$/.test(norm(p));
 
 // Every way a command might spell the home directory: C:/Users/x, /c/Users/x, ~, $HOME...
@@ -219,6 +240,48 @@ function wordReason(word, ctx) {
   return null;
 }
 
+// The floor that keeps the guard no weaker than the text rules it replaced. They run over the
+// code as the parser read it (words, assignments, redirect targets and here-document bodies)
+// minus what it proves is data: literal commit messages and gh bodies, quoted here-document
+// bodies written to a file or git (DATA_SINKS) when nothing in the command runs a script or
+// shell, and git config reads. The terms
+// and guarded-folder rules run over the whole source, data included.
+const DATA_SINKS = new Set(['cat', 'tee', 'git', 'gh']);
+const MESSAGE_OPTS = { git: ['-m', '--message'], gh: ['-b', '--body', '-t', '--title'] };
+function floorReason(source, parsed, ctx) {
+  if (ctx.mentionsTerms(source)) return REASON.terms;
+  if (ctx.guardedDirs.some(g => norm(source).includes(g) || expandHome(source, ctx.home).includes(g))) return REASON.guarded;
+  const runsCode = parsed.commands.some(c => c.words.some(w => {
+    const name = commandName(w);
+    return w.dynamic || SHELLS.has(name) || POWERSHELLS.has(name) || Object.hasOwn(INTERPRETERS, name) ||
+      name === 'source' || name === '.' || w.value.includes('/') && w === c.words[0];
+  }));
+  const lines = [];
+  for (const command of parsed.commands) {
+    const words = command.words;
+    const name = words[0] ? commandName(words[0]) : '';
+    const isConfigRead = isGit(name) && words.some(w => w.value === 'config') &&
+      configReason(words.slice(words.findIndex(w => w.value === 'config') + 1)) === null;
+    const kept = [];
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (isConfigRead && /hookspath/i.test(w.value)) continue;
+      const opts = MESSAGE_OPTS[isGit(name) ? 'git' : name] ?? [];
+      if (opts.includes(w.value) && words[i + 1] && !words[i + 1].dynamic) { i++; continue; }
+      if (opts.some(o => o.length === 2 && w.value.startsWith(o) && w.value.length > 2) && !w.dynamic) continue;
+      if (opts.some(o => o.startsWith('--') && w.value.startsWith(`${o}=`)) && !w.dynamic) continue;
+      kept.push(w.raw);
+    }
+    for (const a of command.assignments) kept.push(a.value.raw);
+    for (const r of command.redirects) {
+      kept.push(r.target.raw);
+      if (r.heredoc && !(r.heredoc.quoted && !runsCode && DATA_SINKS.has(name))) lines.push(...r.heredoc.body.split('\n'));
+    }
+    lines.push(kept.join(' '));
+  }
+  return textReason(lines.join('\n'), ctx);
+}
+
 // Variables assigned once, to a value the guard can work out, are substituted in later words,
 // so S=/tmp/x; bash -c "ls $S" is checked as what it runs. A name assigned more than once, or
 // in a way the parser doesn't show (for, read, arithmetic), stays unknown, and so does every
@@ -226,7 +289,9 @@ function wordReason(word, ctx) {
 function variableFacts(source, commands, functions) {
   const counts = new Map();
   const bump = (name, n = 1) => counts.set(name, (counts.get(name) ?? 0) + n);
-  for (const m of source.matchAll(/(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*(?:[-+*/%&|^]?=|\+\+|--)/g)) bump(m[1]);
+  // ${X:=v} assigns too, and unset makes a name unknown rather than empty.
+  for (const m of source.matchAll(/(?<![\w$])([A-Za-z_]\w*)(?:\[[^\]]*\])?\s*(?::?[-+*/%&|^]?=|\+\+|--)/g)) bump(m[1]);
+  for (const m of source.matchAll(/\bunset\b([^;&|\n]*)/g)) for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
   for (const m of source.matchAll(/\b(?:for|select)\s+([A-Za-z_]\w*)/g)) bump(m[1], 2);
   for (const m of source.matchAll(/\b(?:read|mapfile|readarray|getopts|printf\s+-v)\b([^;&|\n]*)/g)) {
     for (const name of m[1].match(/[A-Za-z_]\w*/g) ?? []) bump(name, 2);
@@ -234,7 +299,7 @@ function variableFacts(source, commands, functions) {
   const disabled = commands.some(c => c.words[0] && ['source', '.', 'eval'].includes(c.words[0].value));
   // Functions that run their arguments as a command (t() { ...; "$@"; }): each call's
   // arguments are checked as that command.
-  const forwarders = new Set([...functions].filter(([, body]) => body.some(c => FORWARD.test(c.words[0]?.raw ?? ''))).map(([name]) => name));
+  const forwarders = new Set([...functions].filter(([, body]) => body.some(isForward)).map(([name]) => name));
   // Every assignment's raw value by name, for judging a variable used as a command name.
   const all = new Map();
   for (const c of commands) {
@@ -247,6 +312,9 @@ function variableFacts(source, commands, functions) {
   return { counts, disabled, all, forwarders, values: new Map() };
 }
 const FORWARD = /^"?\$(\{?[@*]\}?|\{?[1-9]\}?)"?$/;
+// "$@" as the whole command; with words after it, the caller's command gets arguments the
+// call doesn't show, so that is denied as an unknown command name.
+const isForward = c => c.words.length === 1 && FORWARD.test(c.words[0].raw);
 const NO_FACTS = { counts: new Map(), disabled: true, all: new Map(), forwarders: new Set(), values: new Map() };
 
 function recordAssignments(command, facts) {
@@ -297,9 +365,10 @@ function resolveWord(word, facts) {
 function harmlessCommandVariable(word, facts) {
   const harmless = raw => {
     const name = raw.replace(/["']/g, '').split('/').pop().toLowerCase().replace(/\.exe$/, '');
-    return /^[\w.+-]+$/.test(name) && !XARGS_UNSAFE.has(name) && !['source', '.', 'alias'].includes(name);
+    return /^[\w.+-]+$/.test(name) && !isUnsafe(name) && !['source', '.', 'alias'].includes(name);
   };
-  if (/\/[\w.+-]+["']?$/.test(word.raw)) return harmless(word.raw);
+  // Quoted, so a variable holding blanks can't split it into another command.
+  if (/\/[\w.+-]+["']?$/.test(word.raw)) return !hasUnquotedExpansion(word.raw) && harmless(word.raw);
   const m = /^"?\$\{?([A-Za-z_]\w*)\}?"?$/.exec(word.raw);
   const raws = m && facts.all.get(m[1]);
   if (!raws || raws.length !== facts.counts.get(m[1])) return false;
@@ -308,6 +377,12 @@ function harmlessCommandVariable(word, facts) {
 
 function envReason(name, value) {
   if (GUARDED_ENV.test(name)) return REASON.env(name);
+  if (COMMAND_ENV.test(name)) {
+    // A literal program and options (GIT_EDITOR=true, GIT_SSH_COMMAND="ssh -i key"), nothing more.
+    const text = value.raw.replace(/^(["'])(.*)\1$/s, '$2');
+    const program = text.split(/\s+/)[0].split('/').pop().toLowerCase();
+    if (/[$`;&|<>()\n]/.test(text) || !/^[\w.+-]+$/.test(program) || isUnsafe(program)) return REASON.env(name);
+  }
   // A PATH that puts a folder before the existing one can shadow git with another program.
   if (name === 'PATH' && !/^["']?\$\{?PATH\}?(:|["']?$)/.test(value.raw)) return REASON.env('PATH (other than appending to it)');
   return null;
@@ -321,6 +396,7 @@ function bashReason(source, ctx, nesting, outer = null) {
     if (error instanceof ShellParseError) return REASON.unparsed(error.message);
     throw error;
   }
+  if (nesting === 0) { const reason = floorReason(source, parsed, ctx); if (reason) return reason; }
   const facts = variableFacts(source, parsed.commands, parsed.functions);
   // Code in a string or here-document the outer shell expands sees the outer variables.
   if (outer && !outer.disabled) {
@@ -372,6 +448,7 @@ function commandReason(original, ctx, nesting, facts) {
     const rest = words.slice(i + 1);
     let reason = null;
     if (name === 'git') reason = gitReason(rest, ctx, nesting);
+    else if (isGit(name)) reason = gitReason([{ ...words[i], raw: name.slice(4), value: name.slice(4) }, ...rest], ctx, nesting);
     else if (SHELLS.has(name)) { const script = shellScript(rest); if (script.string) reason = stringReason(script.string, ctx, nesting, facts); }
     else if (POWERSHELLS.has(name)) reason = powershellReason(rest, ctx);
     else if (Object.hasOwn(INTERPRETERS, name)) reason = interpreterInlineReason(name, rest, ctx).reason;
@@ -407,7 +484,7 @@ function commandStart(words) {
     }
     i += wrapper.skip ?? 0;
   }
-  if (viaXargs && i < words.length && (words[i].dynamic || XARGS_UNSAFE.has(commandName(words[i])))) {
+  if (viaXargs && i < words.length && (words[i].dynamic || isUnsafe(commandName(words[i])))) {
     return REASON.unseen('xargs passes arguments from stdin to a command that could reach git');
   }
   return i;
@@ -419,7 +496,7 @@ function startReason(command, start, ctx, nesting, facts) {
   const words = command.words;
   if (words[start].dynamic) {
     // "$@" in a function runs what its callers pass, and each call is checked instead.
-    if (FORWARD.test(words[start].raw) || harmlessCommandVariable(words[start], facts)) return null;
+    if ((FORWARD.test(words[start].raw) && start === words.length - 1) || harmlessCommandVariable(words[start], facts)) return null;
     return REASON.unseen('a command name known only when it runs');
   }
   const name = commandName(words[start]);
@@ -510,10 +587,8 @@ function interpreterInlineReason(name, args, ctx) {
     const clustered = /^-[a-zA-Z]+$/.test(value) && options.some(o => o.length === 2 && value.endsWith(o[1]));
     if (options.includes(value) || attached || clustered) {
       const code = attached ? { ...args[i], value: value.slice(attached.length + 1) } : args[i + 1];
-      if (!code) return { reason: null };
-      // Interpreter code isn't analysed (script files aren't checked at all), so code holding a
-      // variable gets the same text rules on what it visibly says.
-      return { reason: textReason(code.dynamic ? code.raw : code.value, ctx) };
+      // Inline code gets the text rules through the floor, which reads every word as written.
+      return { reason: null };
     }
     if (value === '-') return { reason: null, stdin: true };
     if (!value.startsWith('-')) positional = true;
@@ -560,6 +635,7 @@ function gitReason(args, ctx, nesting) {
     if (/^-c./.test(value)) { const reason = keyReason({ value: value.slice(2) }); if (reason) return reason; }
     if (value.startsWith('--config-env=')) { const reason = keyReason({ value: value.slice(13) }); if (reason) return reason; }
     if (value.startsWith('--exec-path=')) return REASON.env('where git finds its commands (--exec-path)');
+    if (value === '--git-dir' || value.startsWith('--git-dir=')) return REASON.env('the repository git uses (--git-dir)');
     if (GIT_OPTS_WITH_VALUE.has(value)) i++;
   }
   const sub = args[i];
@@ -640,9 +716,14 @@ function hookSkippingReason(name, args) {
   for (let i = 0; i < args.length; i++) {
     const word = args[i];
     if (word.value === '--' && !word.quoted) return null;
-    if (valueOpts.includes(word.value)) { i++; continue; }
+    // An option's value is skipped, unless an unquoted variable could split it into more words.
+    if (valueOpts.includes(word.value)) {
+      if (args[i + 1]?.dynamic && hasUnquotedExpansion(args[i + 1].raw)) return REASON.unseen(`an unquoted git ${name} ${word.value} value known only when it runs (it could split into a flag that skips hooks)`);
+      i++; continue;
+    }
     if (word.dynamic || word.glob) {
-      if (/^--?[A-Za-z][\w-]*=/.test(word.raw) || (name === 'commit' && /^-[mFCct]/.test(word.raw))) continue;
+      const attachedValue = /^--?[A-Za-z][\w-]*=/.test(word.raw) || (name === 'commit' && /^-[mFCct]/.test(word.raw));
+      if (attachedValue && !hasUnquotedExpansion(word.raw)) continue;
       // It can't be a flag when it starts with a literal other than "-" (refs/$x), and git
       // rejects any option holding a ":" before acting, so a refspec ("$sha:refs/x") is safe.
       if (/^["']?[^-$`"'{*?[\\]/.test(word.raw) || /:/.test(word.raw.replace(/\$\{[^}]*\}|\$\([^)]*\)|`[^`]*`/g, ''))) continue;
