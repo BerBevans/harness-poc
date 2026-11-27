@@ -290,10 +290,11 @@ function soleCall(parsed) {
   const [cat] = parsed.commands;
   const heredoc = cat.redirects[0]?.heredoc;
   if (!plain(cat) || cat.words.length !== 1 || cat.words[0].value !== 'cat' || cat.redirects.length !== 1 || !heredoc?.quoted) return null;
-  // The here-document must sit inside one "$(cat ...)" argument of the git or gh call.
-  const inMessage = main.words.some(w => w.start !== null && w.raw.startsWith('"$(cat') && w.raw.endsWith(')"') &&
+  // The here-document must sit inside one "$(cat ...)" argument of the git or gh call; the
+  // floor then checks that argument is a message option's value.
+  const index = main.words.findIndex(w => w.start !== null && w.raw.startsWith('"$(cat') && w.raw.endsWith(')"') &&
     w.start <= heredoc.start && heredoc.end <= w.start + w.raw.length);
-  return inMessage ? { main, heredoc } : null;
+  return index > 0 ? { main, heredoc, index } : null;
 }
 // The git subcommand and its index, skipping global options as gitReason does.
 function gitSubcommand(name, words) {
@@ -332,7 +333,12 @@ function floorReason(source, parsed, ctx) {
       else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2 && w.value[2] !== '-') ||
         (o.startsWith('--') && w.value.startsWith(`${o}=`) && w.value[o.length + 1] !== '-'))) blankWord(w);
     }
-    if (call.heredoc) blank(call.heredoc.start, call.heredoc.end);
+    // A here-document is data only as the value of -m (or -b, -t for gh): as a bare argument,
+    // git push "$(cat <<'X' ...)" passes its body as flags. A body starting with "-" is never
+    // blanked, since an option before -m may take -m as its value (-t -m).
+    if (call.heredoc && opts.includes(words[call.index - 1].value) && !call.heredoc.body.startsWith('-')) {
+      blank(call.heredoc.start, call.heredoc.end);
+    }
   }
   return textReason(text.join(''), ctx);
 }
