@@ -182,6 +182,10 @@ export const blocked = [
   ['a DEBUG trap running the command text', `trap 'eval "eval \${BASH_COMMAND#*-m }"' DEBUG; git commit -m 'git push --no-verify'`],
   // test -v evaluates an array subscript, running a $(...) its argument holds (checked in bash).
   ['a data-only git function running its message', `git() { test -v "a[$3]"; }; git commit -m '$(git push --no-verify)'`],
+  ['test -v running the last commit message', `git commit --allow-empty -m '$(git push --no-verify)' && test -v "a[$(git log -1 --format=%s)]"`],
+  ['[ -v running the last commit message', `git commit --allow-empty -m '$(git push --no-verify)' && [ -v "a[$(git log -1 --format=%s)]" ]`],
+  ['printf -v running the last commit message', `git commit --allow-empty -m '$(git push --no-verify)' && printf -v "a[$(git log -1 --format=%s)]" x`],
+  ['sort handing the message to a compress program', `git commit --allow-empty -m 'git push --no-verify' && git log -1 --format=%B | sort -S 64k --compress-program=sh`],
   ['a loadable builtin replacing git', 'enable -f ./x.so git; git commit -m "git push --no-verify"'],
   ['a message beside a non-data command', 'dotnet test && git commit -m "explain --no-verify"'],
   ['git by absolute path with the flag in its message', '/usr/bin/git commit -m "explain --no-verify"'],

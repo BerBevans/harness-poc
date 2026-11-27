@@ -275,8 +275,11 @@ function wordReason(word, ctx) {
 // quoted here-document bodies, and a literal hooksPath key in a git config read. Nothing is
 // blanked unless every command is a plain file or git command (DATA_COMMANDS). The terms and
 // guarded-folder rules run over the whole source, data included.
-const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'printf', 'rm', 'mv', 'cp',
-  'true', 'wc', 'head', 'tail', 'sort', 'diff', 'touch', 'test', '[', 'pwd']);
+// None of these takes a program to run or evaluates its arguments: test, [ and printf -v
+// evaluate an array subscript (running a $(...) it holds), and sort --compress-program runs a
+// program, so they are left out.
+const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'rm', 'mv', 'cp',
+  'true', 'wc', 'head', 'tail', 'diff', 'touch', 'pwd']);
 // The git subcommand and its index, skipping global options as gitReason does.
 function gitSubcommand(name, words) {
   if (name !== 'git') return { name: name.slice(4), index: 0 };
