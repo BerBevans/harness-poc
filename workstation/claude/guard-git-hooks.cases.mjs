@@ -80,6 +80,7 @@ export const blocked = [
   // The twin's review of #102: the text rules stay as a floor, so strings another program runs
   // as code are still caught, and so is the terms file named in here-document data.
   ['the terms file listed in a here-document for xargs', "xargs cat <<'EOF'\n/home/dev/.config/git/blocked-terms.txt\nEOF"],
+  ['the terms file named in a commit message', 'git commit -m "see /home/dev/.config/git/blocked-terms.txt"'],
   ['the terms file read in a loop over a here-document', "while read f; do cat \"$f\"; done <<'EOF'\n/home/dev/.config/git/blocked-terms.txt\nEOF"],
   ['a trap string', "trap 'git commit -n -m x' EXIT"],
   ['a watch string', "watch -n1 'git push --no-verify'"],
@@ -186,17 +187,30 @@ export const blocked = [
   ['[ -v running the last commit message', `git commit --allow-empty -m '$(git push --no-verify)' && [ -v "a[$(git log -1 --format=%s)]" ]`],
   ['printf -v running the last commit message', `git commit --allow-empty -m '$(git push --no-verify)' && printf -v "a[$(git log -1 --format=%s)]" x`],
   ['sort handing the message to a compress program', `git commit --allow-empty -m 'git push --no-verify' && git log -1 --format=%B | sort -S 64k --compress-program=sh`],
+  // The floor blanks only a sole bare git or gh call; each of these is something more.
+  ['an env prefix on the commit', 'GIT_EDITOR=vi git commit -m "git push --no-verify"'],
+  ['a commit fed from a pipe', 'echo x | git commit -m "git push --no-verify"'],
+  ['a substitution after the message here-document', `git commit -m "$(cat <<'EOF'\ngit push --no-verify\nEOF\n)$(node -e x)"`],
+  ['an unquoted message here-document', 'git commit -m "$(cat <<EOF\n$(git push --no-verify)\nEOF\n)"'],
+  ['a message here-document through cat with an argument', `git commit -m "$(cat - <<'EOF'\ngit push --no-verify\nEOF\n)"`],
+  ['a here-document outside the message', "cat <<'EOF'\ngit push --no-verify\nEOF\ngit commit -m x"],
+  ['rebase -x reading a message back', "git rebase -x 'git log -1 --format=%s | sh' -m 'git push --no-verify'"],
   ['a loadable builtin replacing git', 'enable -f ./x.so git; git commit -m "git push --no-verify"'],
   ['a message beside a non-data command', 'dotnet test && git commit -m "explain --no-verify"'],
   ['git by absolute path with the flag in its message', '/usr/bin/git commit -m "explain --no-verify"'],
   // Fail closed.
   ['bash the parser refuses', 'echo $[1+1]'],
+  // Notes written through a here-document beside other commands: anything but a sole git or gh
+  // call gets the old text rules (the floor), so these are denied as before. Use the Write tool.
+  ['a note naming the flags, written through a quoted here-document', "cat > notes.md <<'EOF'\nNever use --no-verify or git commit -n.\nEOF"],
+  ['a note and a commit in one command', "cat > notes.md <<'EOF'\nNever use --no-verify.\nEOF\ngit add notes.md && git commit -m 'Add notes'"],
+  ['a twin log entry naming hooksPath, through a quoted here-document', "cat >> log.md <<'EOF'\n- `core.hooksPath` alone is not enough.\nEOF\ngit add log.md && git commit -qm 'Log it'"],
 ];
 
 export const allowed = [
   // False positives of the pattern-matching guard.
-  ['a note naming the flags, written through a quoted here-document', "cat > notes.md <<'EOF'\nNever use --no-verify or git commit -n.\nEOF"],
   ['a commit message naming the flag', 'git commit -m "Explain why --no-verify is blocked"'],
+  ['a PR body naming the flag through the here-document idiom', `gh pr create --title t --body "$(cat <<'EOF'\nExplain --no-verify\nEOF\n)"`],
   ['a grep for the flag', 'grep -rn -e "-n" src'],
   ['reading the hooksPath value', 'git config --get core.hooksPath'],
   ['reading the hooksPath value without --get', 'git config core.hooksPath'],
@@ -230,9 +244,7 @@ export const allowed = [
   ['an editor set to a plain program', 'GIT_EDITOR=true git rebase --continue'],
   ['an ssh command with options', 'GIT_SSH_COMMAND="ssh -i key -o IdentitiesOnly=yes" git fetch'],
   ['an editor with an option', 'EDITOR="code --wait" git commit'],
-  ['a note and a commit in one command', "cat > notes.md <<'EOF'\nNever use --no-verify.\nEOF\ngit add notes.md && git commit -m 'Add notes'"],
   ['fetch -m is not a message', 'git fetch -m origin'],
-  ['a twin log entry naming hooksPath, through a quoted here-document', "cat >> log.md <<'EOF'\n- `core.hooksPath` alone is not enough.\nEOF\ngit add log.md && git commit -qm 'Log it'"],
   ['a commit message naming the flag through the here-document idiom', "git commit -m \"$(cat <<'EOF'\nExplain --no-verify\nEOF\n)\""],
   ['a quoted PATH append after export', 'export "PATH=$PATH:/x"'],
   ['an interactive rebase', 'git rebase -i --autosquash HEAD~3'],

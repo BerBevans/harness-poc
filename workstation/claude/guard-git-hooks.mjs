@@ -271,15 +271,30 @@ function wordReason(word, ctx) {
 }
 
 // The floor that keeps the guard no weaker than the text rules it replaced. They run over the
-// whole source minus what the parser proves is data: literal commit messages and gh bodies,
-// quoted here-document bodies, and a literal hooksPath key in a git config read. Nothing is
-// blanked unless every command is a plain file or git command (DATA_COMMANDS). The terms and
-// guarded-folder rules run over the whole source, data included.
-// None of these takes a program to run or evaluates its arguments: test, [ and printf -v
-// evaluate an array subscript (running a $(...) it holds), and sort --compress-program runs a
-// program, so they are left out.
-const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'rm', 'mv', 'cp',
-  'true', 'wc', 'head', 'tail', 'diff', 'touch', 'pwd']);
+// whole source minus what the parser proves is data: a literal commit, merge or tag message, a
+// gh body or title, a here-document feeding the message, and a literal hooksPath key in a git
+// config read. The terms and guarded-folder rules run over the whole source, data included.
+//
+// Data is only data while nothing else in the command can read it back and run it (a git
+// function, eval, a trap, python reading git log, test -v evaluating a subscript). So blanking
+// happens only when the whole command is one bare git or gh call, optionally with its message
+// from a quoted here-document: git commit -m "$(cat <<'EOF' ... EOF)". Anything more and the
+// text rules read everything, as the old guard did.
+// (A function definition needs a body, whose commands make the count more than one or two.)
+function soleCall(parsed) {
+  const plain = c => !c.assignments.length && c.pipedFrom === null && c.words.length > 0 && !c.words[0].dynamic;
+  const main = parsed.commands.at(-1);
+  if (!main || !plain(main) || !['git', 'gh'].includes(main.words[0].value)) return null;
+  if (parsed.commands.length === 1) return { main, heredoc: null };
+  if (parsed.commands.length !== 2) return null;
+  const [cat] = parsed.commands;
+  const heredoc = cat.redirects[0]?.heredoc;
+  if (!plain(cat) || cat.words.length !== 1 || cat.words[0].value !== 'cat' || cat.redirects.length !== 1 || !heredoc?.quoted) return null;
+  // The here-document must sit inside one "$(cat ...)" argument of the git or gh call.
+  const inMessage = main.words.some(w => w.start !== null && w.raw.startsWith('"$(cat') && w.raw.endsWith(')"') &&
+    w.start <= heredoc.start && heredoc.end <= w.start + w.raw.length);
+  return inMessage ? { main, heredoc } : null;
+}
 // The git subcommand and its index, skipping global options as gitReason does.
 function gitSubcommand(name, words) {
   if (name !== 'git') return { name: name.slice(4), index: 0 };
@@ -293,27 +308,20 @@ const MESSAGE_OPTS = { git: ['-m', '--message'], gh: ['-b', '--body', '-t', '--t
 function floorReason(source, parsed, ctx) {
   if (ctx.mentionsTerms(source)) return REASON.terms;
   if (ctx.guardedDirs.some(g => norm(source).includes(g) || expandHome(source, ctx.home).includes(g))) return REASON.guarded;
-  // Blanking trusts that git is git and cat is cat, so it happens only when every command, at
-  // any depth, is one of DATA_COMMANDS named without a path and nothing defines a function.
-  // Anything else (a git function, eval, command eval, source, ./git, trap, python reading
-  // git log back, make, npm) could run the "data" as code. An allow list, so a way to
-  // redefine a command that isn't listed here fails safe.
-  const dataOnly = parsed.functions.size === 0 && parsed.commands.every(c => !c.words.length ||
-    (!c.words[0].dynamic && DATA_COMMANDS.has(c.words[0].value)));
+  const call = soleCall(parsed);
   // The whole source, with proven-data spans blanked: anything the parser reads past (array
   // elements, for lists, [[ ]] operands, comments) stays in. Spans come from the parser's
   // positions; a word without one (inside a backtick body with escapes) is never blanked.
   const text = source.split('');
   const blank = (start, end) => { if (start !== null) for (let i = start; i < end; i++) if (text[i] !== '\n') text[i] = ' '; };
   const blankWord = w => w.start !== null && source.startsWith(w.raw, w.start) && blank(w.start, w.start + w.raw.length);
-  const commands = dataOnly ? parsed.commands : [];
-  for (const command of commands) {
-    const words = command.words;
-    const name = words[0] ? commandName(words[0]) : '';
-    const sub = isGit(name) ? gitSubcommand(name, words) : null;
+  if (call) {
+    const words = call.main.words;
+    const name = words[0].value;
+    const sub = name === 'git' ? gitSubcommand(name, words) : null;
     const isConfigRead = sub?.name === 'config' && configReason(words.slice(sub.index + 1)) === null;
     // -m is a message only for these; elsewhere (fetch -m, rebase -m) it takes no value.
-    const opts = MESSAGE_OPTS[isGit(name) ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
+    const opts = MESSAGE_OPTS[name === 'git' ? (['commit', 'merge', 'tag'].includes(sub?.name) ? 'git' : '') : name] ?? [];
     for (let i = 0; i < words.length; i++) {
       const w = words[i];
       // A key is a literal like core.hooksPath; a word holding a substitution is code.
@@ -324,7 +332,7 @@ function floorReason(source, parsed, ctx) {
       else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2 && w.value[2] !== '-') ||
         (o.startsWith('--') && w.value.startsWith(`${o}=`) && w.value[o.length + 1] !== '-'))) blankWord(w);
     }
-    for (const r of command.redirects) if (r.heredoc?.quoted) blank(r.heredoc.start, r.heredoc.end);
+    if (call.heredoc) blank(call.heredoc.start, call.heredoc.end);
   }
   return textReason(text.join(''), ctx);
 }
