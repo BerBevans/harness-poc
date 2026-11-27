@@ -176,6 +176,15 @@ export const blocked = [
   ['an eval-defined git function', `eval 'git(){ node -e "$3"; }'; git commit -m "require('child_process').execSync('git commit --no-verify -m x')"`],
   ['a sourced file that could define git', `. ./w.sh; git commit -m "require('child_process').execSync('git commit --no-verify -m x')"`],
   ['a here-document fed to ./cat', "./cat <<'EOF'\ngit commit --no-verify -m x\nEOF"],
+  ['command eval defining git', `command eval 'git() { node -e "$3"; }'; git commit -m "require('child_process').execSync('git push --no-verify')"`],
+  ['builtin . of a file that could define git', `builtin . ./w.sh; git commit -m "require('child_process').execSync('git push --no-verify')"`],
+  ['python running the last commit message', `git commit --allow-empty -m "git push --no-verify" && python3 -c 'import subprocess as s; s.run(s.check_output(["git","log","-1","--format=%s"]), shell=True)'`],
+  ['a DEBUG trap running the command text', `trap 'eval "eval \${BASH_COMMAND#*-m }"' DEBUG; git commit -m 'git push --no-verify'`],
+  // test -v evaluates an array subscript, running a $(...) its argument holds (checked in bash).
+  ['a data-only git function running its message', `git() { test -v "a[$3]"; }; git commit -m '$(git push --no-verify)'`],
+  ['a loadable builtin replacing git', 'enable -f ./x.so git; git commit -m "git push --no-verify"'],
+  ['a message beside a non-data command', 'dotnet test && git commit -m "explain --no-verify"'],
+  ['git by absolute path with the flag in its message', '/usr/bin/git commit -m "explain --no-verify"'],
   // Fail closed.
   ['bash the parser refuses', 'echo $[1+1]'],
 ];

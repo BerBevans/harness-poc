@@ -37,6 +37,10 @@ const WRAPPERS = [
   { wrap: s => `eval 'git(){ node -e "$3"; }'; ${s}` },
   { wrap: s => `. ./w.sh; ${s}` },
   { wrap: s => `./${s}` },
+  { wrap: s => `command eval 'git(){ node -e "$3"; }'; ${s}` },
+  { wrap: s => `builtin . ./w.sh; ${s}` },
+  { wrap: s => `trap 'eval "eval \${BASH_COMMAND#*-m }"' DEBUG; ${s}` },
+  { wrap: s => `${s}; python3 -c 'x'` },
 ];
 
 // Old-guard denials the new guard is meant to drop: the allowed cases, run directly, where the

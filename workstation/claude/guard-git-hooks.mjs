@@ -272,11 +272,9 @@ function wordReason(word, ctx) {
 
 // The floor that keeps the guard no weaker than the text rules it replaced. They run over the
 // whole source minus what the parser proves is data: literal commit messages and gh bodies,
-// quoted here-document bodies when every command is a plain file or git command
-// (DATA_COMMANDS), and a literal hooksPath key in a git config read. Nothing is blanked when
-// the command could change what git, gh or cat run: a function, eval, source, or a command
-// given as a path. The
-// terms and guarded-folder rules run over the whole source, data included.
+// quoted here-document bodies, and a literal hooksPath key in a git config read. Nothing is
+// blanked unless every command is a plain file or git command (DATA_COMMANDS). The terms and
+// guarded-folder rules run over the whole source, data included.
 const DATA_COMMANDS = new Set(['cat', 'tee', 'git', 'gh', 'mkdir', 'cd', 'ls', 'echo', 'printf', 'rm', 'mv', 'cp',
   'true', 'wc', 'head', 'tail', 'sort', 'diff', 'touch', 'test', '[', 'pwd']);
 // The git subcommand and its index, skipping global options as gitReason does.
@@ -292,21 +290,20 @@ const MESSAGE_OPTS = { git: ['-m', '--message'], gh: ['-b', '--body', '-t', '--t
 function floorReason(source, parsed, ctx) {
   if (ctx.mentionsTerms(source)) return REASON.terms;
   if (ctx.guardedDirs.some(g => norm(source).includes(g) || expandHome(source, ctx.home).includes(g))) return REASON.guarded;
-  // Quoted here-documents are data only when every command is one of these (awk, make or npm
-  // could run what a here-document writes or pipes on).
-  const dataOnly = parsed.commands.every(c => !c.words.length || (!c.words[0].dynamic && DATA_COMMANDS.has(commandName(c.words[0]))));
+  // Blanking trusts that git is git and cat is cat, so it happens only when every command, at
+  // any depth, is one of DATA_COMMANDS named without a path and nothing defines a function.
+  // Anything else (a git function, eval, command eval, source, ./git, trap, python reading
+  // git log back, make, npm) could run the "data" as code. An allow list, so a way to
+  // redefine a command that isn't listed here fails safe.
+  const dataOnly = parsed.functions.size === 0 && parsed.commands.every(c => !c.words.length ||
+    (!c.words[0].dynamic && DATA_COMMANDS.has(c.words[0].value)));
   // The whole source, with proven-data spans blanked: anything the parser reads past (array
   // elements, for lists, [[ ]] operands, comments) stays in. Spans come from the parser's
   // positions; a word without one (inside a backtick body with escapes) is never blanked.
   const text = source.split('');
   const blank = (start, end) => { if (start !== null) for (let i = start; i < end; i++) if (text[i] !== '\n') text[i] = ' '; };
   const blankWord = w => w.start !== null && source.startsWith(w.raw, w.start) && blank(w.start, w.start + w.raw.length);
-  // Blanking trusts that git is git and cat is cat. A function (git() { node -e "$3"; }), eval,
-  // a sourced file, or a command given as a path (./git, ./cat) could each run the "data" as
-  // code, so then nothing is blanked.
-  const redefinable = parsed.functions.size > 0 || parsed.commands.some(c => c.words[0] &&
-    (c.words[0].dynamic || c.words[0].value.includes('/') || ['eval', 'source', '.'].includes(c.words[0].value)));
-  const commands = redefinable ? [] : parsed.commands;
+  const commands = dataOnly ? parsed.commands : [];
   for (const command of commands) {
     const words = command.words;
     const name = words[0] ? commandName(words[0]) : '';
@@ -324,7 +321,7 @@ function floorReason(source, parsed, ctx) {
       else if (!w.dynamic && opts.some(o => (o.length === 2 && w.value.startsWith(o) && w.value.length > 2 && w.value[2] !== '-') ||
         (o.startsWith('--') && w.value.startsWith(`${o}=`) && w.value[o.length + 1] !== '-'))) blankWord(w);
     }
-    for (const r of command.redirects) if (r.heredoc?.quoted && dataOnly) blank(r.heredoc.start, r.heredoc.end);
+    for (const r of command.redirects) if (r.heredoc?.quoted) blank(r.heredoc.start, r.heredoc.end);
   }
   return textReason(text.join(''), ctx);
 }
