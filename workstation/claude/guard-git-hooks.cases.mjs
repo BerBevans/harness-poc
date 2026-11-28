@@ -7,6 +7,8 @@ export const blocked = [
   ['a skip flag decoded from $\'...\'', "git commit $'--no-veri\\x66y' -m x"],
   ['a skip flag in a variable', 'F=--no-verify; git commit $F -m x'],
   ['commit -n through a wrapper', 'nice -n 5 git commit -n -m x'],
+  ['commit -n after --attr-source and its value', 'git --attr-source x commit -n -m y'],
+  ['commit -n after --shallow-file and its value', 'git --shallow-file x commit -n -m y'],
   ['commit -n inside a function body', 'g() { git commit -n -m x; }; g'],
   ['commit -n in an unquoted here-document substitution', 'cat <<EOF\n$(git commit -n -m x)\nEOF'],
   ['a glob argument to commit', 'git commit -m x *'],
