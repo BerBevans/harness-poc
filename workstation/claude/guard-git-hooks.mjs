@@ -61,7 +61,7 @@ export const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tre
 export const GIT_FLAG_OPTS = new Set(['-p', '-P', '--paginate', '--no-pager', '--bare', '--no-replace-objects',
   '--literal-pathspecs', '--no-literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
   '--no-optional-locks', '--no-lazy-fetch', '--no-advice', '--exec-path', '--html-path', '--man-path', '--info-path']);
-const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
+export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
   '--attr-source=', '--exec-path=', '--list-cmds='];
 // These end option parsing: git runs `git help` or `git version` with whatever follows.
 const GIT_HELP_OPTS = new Set(['-h', '--help', '-v', '--version']);

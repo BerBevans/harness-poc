@@ -8,7 +8,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { GIT_FLAG_OPTS, GIT_OPTS_WITH_VALUE, decide } from './guard-git-hooks.mjs';
+import { GIT_ATTACHED_OPTS, GIT_FLAG_OPTS, GIT_OPTS_WITH_VALUE, decide } from './guard-git-hooks.mjs';
+import * as plugin from '../../plugins/factory-harness/hooks/lib/command.mjs';
 
 const MIN_VERSION = { '--no-lazy-fetch': [2, 44], '--no-advice': [2, 46] };
 // A value each value-taking option accepts, so `git <option> <value> version` succeeds.
@@ -71,4 +72,12 @@ test('the text rules check every commit after an unknown option', () => {
   const reason = decide({ tool_name: 'PowerShell', tool_input: { command: 'git --future-opt x commit -n -m y' } }, { home: '/home/dev' });
   assert.ok(reason);
   assert.equal(decide({ tool_name: 'PowerShell', tool_input: { command: 'git --no-pager commit -m y' } }, { home: '/home/dev' }), null);
+});
+
+// The factory plugin keeps its own copy of the lists (it ships without this folder), so the real-git
+// checks above cover it only while the copies match.
+test('the plugin lists the same git global options', () => {
+  assert.deepEqual([...plugin.GIT_OPTS_WITH_VALUE].sort(), [...GIT_OPTS_WITH_VALUE].sort());
+  assert.deepEqual([...plugin.GIT_FLAG_OPTS].sort(), [...GIT_FLAG_OPTS].sort());
+  assert.deepEqual([...plugin.GIT_ATTACHED_OPTS].sort(), [...GIT_ATTACHED_OPTS].sort());
 });

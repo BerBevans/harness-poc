@@ -88,21 +88,41 @@ export function invocationsOf(command, program) {
   return found;
 }
 
-// git's global options that take their value as the next word (git.c handle_options), e.g. `git -C dir commit`.
-// `--shallow-file` is undocumented, and `--super-prefix` has gone from newer gits but costs nothing to keep.
-const GIT_OPTIONS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env',
+// git's global options (git.c handle_options), kept the same as the workstation guard's lists, which
+// workstation/claude/git-global-options.test.mjs checks against the real git. git matches them
+// exactly and rejects any other, so an option missing here is reported as unknown rather than
+// skipped: a value-taking option added in a newer git would otherwise hide the subcommand.
+// Options that take their value as the next word, e.g. `git -C dir commit`:
+export const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
   '--super-prefix', '--attr-source', '--shallow-file']);
+export const GIT_FLAG_OPTS = new Set(['-p', '-P', '--paginate', '--no-pager', '--bare', '--no-replace-objects',
+  '--literal-pathspecs', '--no-literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
+  '--no-optional-locks', '--no-lazy-fetch', '--no-advice', '--exec-path', '--html-path', '--man-path', '--info-path']);
+export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
+  '--attr-source=', '--exec-path=', '--list-cmds='];
+// These end option parsing: git runs `git help` or `git version` with whatever follows.
+const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version' };
 
-/** Every git invocation: { subcommand, args, directory } where directory is the -C value, if any. */
+/**
+ * Every git invocation: { subcommand, args, directory, unknownOption }. directory is the -C value,
+ * if any. unknownOption is a global option git may not know, after which the subcommand can't be
+ * told; subcommand is then ''.
+ */
 export function gitInvocations(command) {
   return invocationsOf(command, 'git').map(tokens => {
     let index = 0;
     let directory = null;
     while (index < tokens.length && isOption(tokens[index])) {
-      if (tokens[index] === '-C') directory = tokens[index + 1] ?? null;
-      index += GIT_OPTIONS_WITH_VALUE.has(tokens[index]) ? 2 : 1;
+      const option = tokens[index];
+      if (option in GIT_HELP_OPTS) {
+        return { subcommand: GIT_HELP_OPTS[option], args: tokens.slice(index + 1), directory, unknownOption: null };
+      }
+      if (option === '-C') directory = tokens[index + 1] ?? null;
+      if (GIT_OPTS_WITH_VALUE.has(option)) index += 2;
+      else if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) index += 1;
+      else return { subcommand: '', args: tokens.slice(index + 1), directory, unknownOption: option };
     }
-    return { subcommand: tokens[index] ?? '', args: tokens.slice(index + 1), directory };
+    return { subcommand: tokens[index] ?? '', args: tokens.slice(index + 1), directory, unknownOption: null };
   });
 }
 
