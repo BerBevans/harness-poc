@@ -41,6 +41,9 @@ const substitutions = command =>
  */
 export function splitSegments(command, depth = 0) {
   if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
+  // A stopgap until the plugin moves onto the bash parser: the splitter doesn't know $'...', where
+  // \' is a quote inside the string, so everything after one would vanish from every rule.
+  if (/\$'(?:[^'\\]|\\[^'])*\\'/.test(command)) throw new Error("the command has a $'...' string with \\' in it, which the guard can't split");
   const segments = [];
   for (const body of substitutions(command)) segments.push(...splitSegments(body, depth + 1));
   // The hook can't tell which shell will run the line, so it splits it both ways and checks every
@@ -50,40 +53,73 @@ export function splitSegments(command, depth = 0) {
     const segment = part.trim().replace(/^(?:[({]\s*)+/, '').replace(/(?:\s*[)}])+$/, '').trim();
     if (!segment) continue;
     segments.push(segment);
-    const tokens = tokenise(segment);
-    const shell = tokens.findIndex(t => SHELLS.has(programName(t)));
-    // -c anywhere in a short-option cluster (bash -lc, sh -ec), pwsh -Command, or cmd /c. The
-    // argument after every such option is followed: pwsh -NonInteractive matches too, and
-    // following its neighbour as a command is harmless.
-    if (shell >= 0) {
-      tokens.forEach((t, i) => {
-        if (i > shell && tokens[i + 1] && /^(-[a-z]*c[a-z]*|\/c)$/i.test(t)) segments.push(...splitSegments(unquote(tokens[i + 1]), depth + 1));
-      });
-    }
+    for (const tokens of tokenisations(segment)) segments.push(...nestedShellCommands(tokens, depth));
   }
   return segments;
 }
 
-export const tokenise = segment => segment.match(/"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g) ?? [];
+// -c anywhere in a short-option cluster (bash -lc, sh -ec), pwsh -Command, or cmd /c. The
+// argument after every such option is followed: pwsh -NonInteractive matches too, and following
+// its neighbour as a command is harmless.
+function nestedShellCommands(tokens, depth) {
+  const shell = tokens.findIndex(t => SHELLS.has(programName(t)));
+  if (shell < 0) return [];
+  return tokens.flatMap((t, i) => i > shell && tokens[i + 1] && /^(-[a-z]*c[a-z]*|\/c)$/i.test(t)
+    ? splitSegments(unquote(tokens[i + 1]), depth + 1) : []);
+}
 
-// Inside double quotes, bash unescapes \" and \\.
-export const unquote = token =>
-  /^".*"$/s.test(token) ? token.slice(1, -1).replace(/\\(["\\$`])/g, '$1') : token.replace(/^'(.*)'$/s, '$1');
+// A word is quoted and unquoted parts run together, as in bash: `-c user.name='a b'` is one word.
+// An escaped quote (\' in bash, `' in PowerShell) and a quote with no closing quote are ordinary
+// characters, so they never start a quoted part.
+export const tokenise = segment =>
+  segment.match(/(?:\$'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|'[^']*'|\\["'\\]|`["'`]|[^\s"']|["'])+/g) ?? [];
+
+// The older reading, where a quote counts only at the start of a word. An apostrophe in prose (a
+// here-document body, "the docs' examples") makes the reading above swallow the words after it, a
+// real command among them, so the rules check every segment both ways: an extra reading only ever
+// blocks more.
+const wordStartTokenise = segment => segment.match(/"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g) ?? [];
+export function tokenisations(segment) {
+  const joined = tokenise(segment);
+  const wordStart = wordStartTokenise(segment);
+  return JSON.stringify(joined) === JSON.stringify(wordStart) ? [joined] : [joined, wordStart];
+}
+
+// bash's $'...' escapes: \n and the like, \xHH, \uHHHH, \UHHHHHHHH and octal \NNN.
+const ANSI_ESCAPES = { n: '\n', t: '\t', r: '\r', a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', v: '\v' };
+const ansiC = body => body.replace(/\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|[\s\S])/g,
+  (_, e) => /^[xuU]./.test(e) ? String.fromCodePoint(parseInt(e.slice(1), 16))
+    : /^[0-7]/.test(e) ? String.fromCharCode(parseInt(e, 8)) : ANSI_ESCAPES[e] ?? e);
+
+const WORD_PART = /\$'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|'([^']*)'|\\([\s\S])|[\s\S]/g;
+const readWord = (token, bash) => token.replace(WORD_PART, (part, ansi, doubled, single, escaped) => {
+  if (ansi !== undefined) return ansiC(ansi);
+  if (doubled !== undefined) return doubled.replace(/\\(["\\$`])/g, '$1');
+  if (single !== undefined) return single;
+  return escaped !== undefined && bash ? escaped : part;
+});
+
+// Removes the quotes from every quoted part. Inside double quotes, bash unescapes \", \\, \$ and \`.
+// A backslash outside quotes stays, since in PowerShell and in Windows paths it's a character.
+export const unquote = token => readWord(token, false);
+// The word as bash reads it, where a backslash outside quotes escapes the next character: re\set is reset.
+export const bashWord = token => readWord(token, true);
 
 const isOption = token => /^-/.test(token);
 const isEnvAssignment = token => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 
 // "C:/Program Files/Git/cmd/git.exe" -> "git"
-export const programName = token =>
-  unquote(token.replace(/^[({]+/, '')).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
+export const programName = (token, read = unquote) =>
+  read(token.replace(/^[({]+/, '')).replace(/\\/g, '/').split('/').pop().replace(/\.exe$/i, '').toLowerCase();
 
-/** Every invocation of a program in the command, as its unquoted argument lists. */
-export function invocationsOf(command, program) {
+/** Every invocation of a program in the command, as its argument lists read by `read` (unquoted by default). */
+export function invocationsOf(command, program, read = unquote) {
   const found = [];
   for (const segment of splitSegments(command)) {
-    const tokens = tokenise(segment);
-    const index = tokens.findIndex(t => programName(t) === program);
-    if (index >= 0) found.push(tokens.slice(index + 1).map(unquote));
+    for (const tokens of tokenisations(segment)) {
+      const index = tokens.findIndex(t => programName(t, read) === program);
+      if (index >= 0) found.push(tokens.slice(index + 1).map(read));
+    }
   }
   return found;
 }
@@ -104,25 +140,34 @@ export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', 
 export const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version' };
 
 /**
- * Every git invocation: { subcommand, args, directory, unknownOption }. directory is the -C value,
- * if any. unknownOption is a global option git may not know, after which the subcommand can't be
- * told; subcommand is then ''.
+ * Every git invocation: { subcommand, args, directory, configs, unknownOption }. directory is the -C
+ * value, if any. configs are the -c and --config-env values (`key=value`), up to the subcommand.
+ * unknownOption is a global option git may not know, after which the subcommand can't be told;
+ * subcommand is then ''. Each invocation is read twice, as written and as bash reads it (g\it re\set),
+ * since the hook can't tell which shell runs the line: an extra reading only ever blocks more.
  */
 export function gitInvocations(command) {
-  return invocationsOf(command, 'git').map(tokens => {
+  const readings = [...invocationsOf(command, 'git'), ...invocationsOf(command, 'git', bashWord)];
+  const distinct = [...new Map(readings.map(tokens => [JSON.stringify(tokens), tokens])).values()];
+  return distinct.map(tokens => {
     let index = 0;
     let directory = null;
+    const configs = [];
+    const result = (subcommand, from, unknownOption = null) =>
+      ({ subcommand, args: tokens.slice(from), directory, configs, unknownOption });
     while (index < tokens.length && isOption(tokens[index])) {
       const option = tokens[index];
       if (option in GIT_HELP_OPTS) {
-        return { subcommand: GIT_HELP_OPTS[option], args: tokens.slice(index + 1), directory, unknownOption: null };
+        return result(GIT_HELP_OPTS[option], index + 1);
       }
       if (option === '-C') directory = tokens[index + 1] ?? null;
+      if (option === '-c' || option === '--config-env') configs.push(tokens[index + 1] ?? '');
+      if (option.startsWith('--config-env=')) configs.push(option.slice('--config-env='.length));
       if (GIT_OPTS_WITH_VALUE.has(option)) index += 2;
       else if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) index += 1;
-      else return { subcommand: '', args: tokens.slice(index + 1), directory, unknownOption: option };
+      else return result('', index + 1, option);
     }
-    return { subcommand: tokens[index] ?? '', args: tokens.slice(index + 1), directory, unknownOption: null };
+    return result(tokens[index] ?? '', index + 1);
   });
 }
 
@@ -146,16 +191,27 @@ const GIT_SUBCOMMANDS_THAT_WRITE_PATHS = new Set(['checkout', 'restore', 'rm', '
 export function writeTargets(segment) {
   const targets = [];
 
-  for (const match of segment.matchAll(/\d*>>?(?!&)\s*("[^"]*"|'[^']*'|[^\s;|&<>]+)/g)) {
-    const target = unquote(match[1]);
-    if (!/^(\/dev\/null|\$null|nul)$/i.test(target)) targets.push(target);
+  // The target read both ways, as with tokenisations.
+  const redirects = [/\d*>>?(?!&)\s*((?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s;|&<>"'])+)/g, /\d*>>?(?!&)\s*("[^"]*"|'[^']*'|[^\s;|&<>]+)/g];
+  // Each target is also read as bash reads it (.git/con\fig).
+  for (const match of redirects.flatMap(pattern => [...segment.matchAll(pattern)])) {
+    for (const target of new Set([unquote(match[1]), bashWord(match[1])])) {
+      if (!/^(\/dev\/null|\$null|nul)$/i.test(target)) targets.push(target);
+    }
   }
 
   for (const match of segment.matchAll(/\[(?:system\.)?io\.file\]::\w+\s*\(\s*("[^"]*"|'[^']*'|[^,)\s]+)/gi)) {
     targets.push(unquote(match[1]));
   }
 
-  const tokens = tokenise(segment).map(unquote);
+  for (const tokens of tokenisations(segment)) {
+    targets.push(...tokenWriteTargets(segment, tokens.map(unquote)), ...tokenWriteTargets(segment, tokens.map(bashWord)));
+  }
+  return targets;
+}
+
+function tokenWriteTargets(segment, tokens) {
+  const targets = [];
   const start = tokens.findIndex(t => !isEnvAssignment(t) && t !== 'sudo');
   if (start < 0) return targets;
 

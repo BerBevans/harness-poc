@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createContext, evaluate } from '../guard.mjs';
-import { splitSegments } from '../lib/command.mjs';
+import { bashWord, splitSegments, tokenise, unquote } from '../lib/command.mjs';
 import { collapseDots } from '../lib/paths.mjs';
 
 decisionTable({
@@ -52,6 +52,19 @@ decisionTable({
   ],
 });
 
+test('a word is its quoted and unquoted parts run together, as in bash', () => {
+  const words = tokenise(`git -c user.name='a b' x"y z"'w' "q\\"r" 'it'"'"'s' lone"quote`).map(unquote);
+  assert.deepEqual(words, ['git', '-c', 'user.name=a b', 'xy zw', 'q"r', "it's", 'lone"quote']);
+});
+
+test('an escaped quote is a character, and bashWord reads a word the way bash does', () => {
+  assert.deepEqual(tokenise(String.raw`x=\' git 'a b'`), [String.raw`x=\'`, 'git', "'a b'"]);
+  assert.deepEqual(tokenise('a`" b"'), ['a`"', 'b"']);
+  assert.equal(unquote(String.raw`C:\dir\x`), String.raw`C:\dir\x`);
+  assert.equal(bashWord(String.raw`re\set`), 'reset');
+  assert.equal(bashWord(String.raw`$'a\x62\143\n'`), 'abc\n');
+});
+
 test('collapseDots handles leading .., drive letters and the root', () => {
   assert.equal(collapseDots('c:/a/../../b'), 'c:/b');
   assert.equal(collapseDots('../a/./b//c'), '../a/b/c');
@@ -62,6 +75,13 @@ test('shells nested too deep make the guard fail closed', () => {
   let command = 'git status';
   for (let i = 0; i < 6; i++) command = `bash -c ${JSON.stringify(command)}`;
   assert.throws(() => splitSegments(command), /nests commands more than 4 deep/);
+});
+
+test("a $'...' string with \\' in it makes the guard fail closed", () => {
+  for (const command of [String.raw`echo $'\'';git reset --hard`, String.raw`echo $'it\'s';git push -f origin x`]) {
+    assert.throws(() => evaluate(bash(command), fakeContext()), /can't split/, command);
+  }
+  assert.equal(evaluate(bash(String.raw`printf $'a\tb\\'; git status`), fakeContext()), null);
 });
 
 // A context whose realpath follows the symlinks given, as the guard's does on disk.

@@ -7,6 +7,8 @@ const inRepo = relative => `${REPO}\\${relative}`;
 
 decisionTable({
   blocked: [
+    ['rm after an escaped quote', bash(String.raw`x=\' rm Directory.Build.props 'y'`)],
+    ['a redirect target quoted in part', bash('echo x > ".github/workflows/"ci.yml')],
     ['Edit of root .editorconfig', edit(inRepo('.editorconfig'), 'a', 'b')],
     ['Write of nested .editorconfig', write(inRepo('src\\Tasks\\.editorconfig'), 'root = true')],
     ['Write of a .globalconfig', write(inRepo('src\\relaxed.globalconfig'), 'is_global = true')],
