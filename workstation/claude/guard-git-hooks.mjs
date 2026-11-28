@@ -46,8 +46,10 @@ const REASON = {
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const MAX_NESTING = 4;
 
-// git global options that take a separate value, e.g. `git -C dir commit`.
-const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix']);
+// git's global options that take their value as the next word (git.c handle_options), e.g. `git -C dir commit`. `--shallow-file` is
+// undocumented, and `--super-prefix` has gone from newer gits but costs nothing to keep.
+const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
+  '--super-prefix', '--attr-source', '--shallow-file']);
 // `git commit` short options that consume the rest of a cluster as their value, e.g. `-mfix`.
 const COMMIT_VALUE_FLAGS = new Set(['m', 'F', 'c', 'C', 't', 'S', 'u']);
 // Options whose value is a separate word, per subcommand that can skip hooks.
