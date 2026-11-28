@@ -22,7 +22,7 @@ git config --global core.hooksPath "~/.config/git/hooks"
 
 ## claude/ - Claude Code PreToolUse hook
 
-`guard-git-hooks.mjs` stops the agent getting round the git hooks or reading the blocked-terms file. It parses Bash commands with `shell-parse.mjs`, so it judges what a command runs rather than what its text mentions: a note written through a quoted here-document is data, and a commit message may name a flag. It denies:
+`guard-git-hooks.mjs` stops the agent getting round the git hooks or reading the blocked-terms file. It parses Bash commands with `shell-parse.mjs` (the factory plugin carries a byte-identical copy in `plugins/factory-harness/hooks/lib/`, which a test keeps in step, so change both together), so it judges what a command runs rather than what its text mentions: a note written through a quoted here-document is data, and a commit message may name a flag. It denies:
 
 - the skip-verification flag and any prefix git accepts for it, and `git commit -n` (including clusters like `-anm`), wherever git runs: behind wrappers, in functions, in `eval`, `bash -c` and `sh -c` strings, in the commands git itself runs (`rebase --exec`, `--upload-pack`, `--receive-pack`, `difftool -x`, `grep -O` and the like), `git submodule foreach` and `git bisect run`, and in a here-document, `echo` or `printf` piped into a shell
 - git config keys that aren't on a short allowlist of harmless ones (`user.*`, `color.*`, `core.quotepath` and similar), through `-c`, `--config-env`, `clone --config`, `GIT_CONFIG_*` or a `git config` write; reading a value, `core.hooksPath` included, is allowed
