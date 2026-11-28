@@ -156,7 +156,7 @@ export function parseError(command, depth = 0) {
   if (depth > MAX_DEPTH) return `the command nests commands more than ${MAX_DEPTH} deep`;
   const { commands, error } = parse(command);
   if (error) return error;
-  for (const c of commands) {
+  for (const c of commands ?? []) {
     for (const { shell, line } of nestedShellCommandLines(c.words.map(w => w.value))) {
       const nested = NOT_BASH.has(shell) ? null : parseError(line, depth + 1);
       if (nested) return nested;
@@ -177,13 +177,14 @@ function parse(command) {
 
 const NOT_BASH = new Set(['pwsh', 'powershell', 'cmd']);
 
-// The command line given to a shell's -c (as nestedShellCommands follows it), with the shell's name.
+// The command line given to a shell's -c (as nestedShellCommands follows it), with the name of the
+// nearest shell before it (pwsh -Command bash -c '...' gives bash the line).
 function nestedShellCommandLines(words) {
-  const index = words.findIndex(w => SHELLS.has(programName(w, w => w)));
-  if (index < 0) return [];
-  const shell = programName(words[index], w => w);
-  return words.flatMap((w, i) => i > index && words[i + 1] !== undefined && /^(-[a-z]*c[a-z]*|\/c)$/i.test(w)
-    ? [{ shell, line: words[i + 1] }] : []);
+  const shells = words.map(w => programName(w, w => w)).map(name => SHELLS.has(name) ? name : null);
+  return words.flatMap((w, i) => {
+    const shell = shells.slice(0, i).findLast(Boolean);
+    return shell && words[i + 1] !== undefined && /^(-[a-z]*c[a-z]*|\/c)$/i.test(w) ? [{ shell, line: words[i + 1] }] : [];
+  });
 }
 
 // git's global options (git.c handle_options), kept the same as the workstation guard's lists, which

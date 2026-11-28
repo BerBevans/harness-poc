@@ -74,6 +74,8 @@ test('bash the parser can\'t read is denied with a rewrite hint; PowerShell is l
 
 test('a bash -c line the parser can\'t read is denied too; a pwsh -Command line is left to the text rules', () => {
   assert.match(evaluate(bash(`bash -c 'echo "unterminated; ls'`), fakeContext()), /couldn't read this command as bash/);
+  assert.match(evaluate(bash(`sh -c 'echo "unterminated; ls'`), fakeContext()), /couldn't read this command as bash/);
+  assert.match(evaluate(bash(`pwsh -Command bash -c 'echo "unterminated'`), fakeContext()), /couldn't read this command as bash/);
   assert.equal(evaluate(bash(`pwsh -Command 'Write-Host "a\`"b"'`), fakeContext()), null);
 });
 
