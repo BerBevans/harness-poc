@@ -116,7 +116,7 @@ for (const route of ALIAS_ROUTES) {
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /git version/);
     const input = { tool_name: 'Bash', tool_input: { command: route.command }, cwd };
-    assert.ok(pluginEvaluate(input, pluginContext), 'the plugin allowed it');
+    assert.match(pluginEvaluate(input, pluginContext) ?? 'allowed', /alias|GIT_CONFIG/, 'the plugin\'s git-config rule didn\'t deny it');
     assert.ok(decide(input, { home: '/home/dev' }), 'the workstation guard allowed it');
   });
 }

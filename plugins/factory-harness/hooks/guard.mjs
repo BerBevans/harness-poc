@@ -16,7 +16,7 @@ import * as suppressions from './rules/suppressions.mjs';
 import * as destructiveGit from './rules/destructive-git.mjs';
 import * as gitConfig from './rules/git-config.mjs';
 
-const RULES = [claudeConfig, guardrailFiles, secrets, suppressions, destructiveGit, gitConfig];
+const RULES = [claudeConfig, guardrailFiles, secrets, suppressions, gitConfig, destructiveGit];
 
 /** Returns a denial reason, or null to allow. */
 export function evaluate(input, context) {

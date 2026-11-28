@@ -4,7 +4,7 @@
 // every comment on the issue, so both count as secrets.
 
 import { baseName, expandHome, isUnder, normalisePath, pathForms, segments } from '../lib/paths.mjs';
-import { gitInvocations, invocationsOf, splitSegments, tokenise, unquote } from '../lib/command.mjs';
+import { gitInvocations, invocationsOf, splitSegments, tokenisations, unquote } from '../lib/command.mjs';
 import { nextStepAfterBlock } from '../lib/next-step.mjs';
 
 const SECRET_FILE_NAMES = new Set(['.git-credentials', '.netrc', '_netrc']);
@@ -45,8 +45,8 @@ function commandPrintsCredentials(command) {
 /** True for printenv, env with no command to run, a shell built-in listing every variable, or env: in PowerShell. */
 function printsEnvironment(command) {
   if (/\b(gci|get-childitem|ls|dir|gi|get-item)\b[^|;]*\benv:/i.test(command)) return true;
-  return splitSegments(command).some(segment => {
-    const [program, ...args] = tokenise(segment).map(unquote);
+  return splitSegments(command).flatMap(tokenisations).some(tokens => {
+    const [program, ...args] = tokens.map(unquote);
     if (program === 'printenv') return true;
     if (program === 'env') return args.every(arg => arg.startsWith('-') || /^[A-Za-z_]\w*=/.test(arg));
     const listing = LISTS_VARIABLES[program];
@@ -59,7 +59,7 @@ function printsEnvironment(command) {
 function secretPathInCommand(command, context, cwd) {
   const { home } = context;
   for (const segment of splitSegments(command)) {
-    for (const token of tokenise(segment).map(unquote).filter(t => !/\s/.test(t))) {
+    for (const token of tokenisations(segment).flat().map(unquote).filter(t => !/\s/.test(t))) {
       const candidate = token.replace(/^[a-z]+=/i, '');
       if (candidate && pathForms(candidate, context, cwd).some(p => isSecretPath(p, home))) return candidate;
     }

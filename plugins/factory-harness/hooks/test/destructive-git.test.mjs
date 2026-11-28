@@ -24,6 +24,14 @@ decisionTable({
     // A quoted part inside a word is still one word, so the value's space doesn't end it.
     ['push after a -c value quoted mid-word', bash("git -c user.name='a b' push -f origin feature/42")],
     ['reset --hard after a -c value quoted mid-word', bash('git -c user.name="a b" reset --hard')],
+    ['reset --hard after an escaped quote', bash(String.raw`x=\' git reset --hard 'HEAD'`)],
+    // An apostrophe in a here-document's prose must not hide the command after it.
+    ['push -f after a here-document with an apostrophe',
+      bash("git commit -F - <<'EOF'\nFix the docs' examples\nEOF\ngit push -f origin feature/42 && echo 'done'")],
+    // bash reads re\set as reset, and $'...' as its body with the escapes decoded.
+    ['a backslash inside the subcommand', bash(String.raw`git re\set --hard`)],
+    ['a backslash inside the program name', bash(String.raw`g\it reset --hard`)],
+    ["a $'...' subcommand", bash(String.raw`git $'re\x73et' --hard`)],
     // Fail closed: after a global option the guard doesn't know, the subcommand can't be told.
     ['push after an unknown global option', bash('git --future-opt x push -f')],
     ['an unknown global option before a harmless subcommand', bash('git --future-opt x status')],
@@ -46,6 +54,7 @@ decisionTable({
     ['gh pr merge', bash('gh pr merge 42 --squash')],
   ],
   allowed: [
+    ['PowerShell git -C with a Windows path', powershell(String.raw`git -C C:\Development\app status`)],
     ['commit after a -c value quoted mid-word', bash("git -c user.name='Jane Doe' commit -m 'Add task'")],
     ['push a feature branch', bash('git push -u origin feature/42-add-task')],
     ['bare push from a feature branch', bash('git push')],

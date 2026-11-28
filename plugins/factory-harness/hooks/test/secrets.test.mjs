@@ -5,6 +5,8 @@ const glob = pattern => ({ tool_name: 'Glob', tool_input: { pattern }, cwd: REPO
 
 decisionTable({
   blocked: [
+    // An escaped quote doesn't start a quoted part, so .env stays a word of its own.
+    ['cat .env after an escaped quote', bash(String.raw`cat \' .env 'y'`)],
     ['Read of .env', read(`${REPO}\\.env`)],
     ['Read of .env.local', read(`${REPO}\\.env.local`)],
     ['Write of .env.production', write(`${REPO}\\.env.production`, 'KEY=x')],
