@@ -41,6 +41,10 @@ const REASON = {
     `evaluates it as arithmetic or an array subscript. ${NEXT_STEP}`,
   unparsed: detail => `Blocked: the guard couldn't parse this command (${detail}), so it failed closed. ${REWRITE_STEP}`,
   unseen: what => `Blocked: this runs code the guard can't see (${what}). ${REWRITE_STEP}`,
+  gitOption: option => `Blocked: "${option}" isn't on the guard's list of git's global options, so it can't tell ` +
+    `which git subcommand runs. If git accepts it, the guard's list needs it added. The guard checks the word git ` +
+    `wherever it appears, so if this isn't a git call (grep -rn git --include=...), put the other program's ` +
+    `options before the word git. ${NEXT_STEP}`,
 };
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -48,8 +52,27 @@ const MAX_NESTING = 4;
 
 // git's global options that take their value as the next word (git.c handle_options), e.g. `git -C dir commit`. `--shallow-file` is
 // undocumented, and `--super-prefix` has gone from newer gits but costs nothing to keep.
-const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
+export const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
   '--super-prefix', '--attr-source', '--shallow-file']);
+// The rest of git's global options. git matches them exactly (no abbreviations or clusters, checked
+// on 2.43) and rejects any other, so an option missing from these lists is denied, not skipped: a
+// value-taking option added in a newer git would otherwise hide the subcommand, as --attr-source did.
+// --no-lazy-fetch (2.44) and --no-advice (2.46) are newer than local git; harness CI runs them all.
+export const GIT_FLAG_OPTS = new Set(['-p', '-P', '--paginate', '--no-pager', '--bare', '--no-replace-objects',
+  '--literal-pathspecs', '--no-literal-pathspecs', '--glob-pathspecs', '--noglob-pathspecs', '--icase-pathspecs',
+  '--no-optional-locks', '--no-lazy-fetch', '--no-advice', '--exec-path', '--html-path', '--man-path', '--info-path']);
+const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
+  '--attr-source=', '--exec-path=', '--list-cmds='];
+// These end option parsing: git runs `git help` or `git version` with whatever follows.
+const GIT_HELP_OPTS = new Set(['-h', '--help', '-v', '--version']);
+
+/** How git reads a global option: 'value' (takes the next word), 'flag', 'help' (help or version runs), or null (unknown). */
+export function gitGlobalOption(option) {
+  if (GIT_OPTS_WITH_VALUE.has(option)) return 'value';
+  if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) return 'flag';
+  if (GIT_HELP_OPTS.has(option)) return 'help';
+  return null;
+}
 // `git commit` short options that consume the rest of a cluster as their value, e.g. `-mfix`.
 const COMMIT_VALUE_FLAGS = new Set(['m', 'F', 'c', 'C', 't', 'S', 'u']);
 // Options whose value is a separate word, per subcommand that can skip hooks.
@@ -182,14 +205,24 @@ function commitUsesShortNoVerify(text) {
   for (const rest of starts) {
     const tokens = tokenise(rest);
     let i = 0;
-    while (i < tokens.length && tokens[i].startsWith('-')) i += GIT_OPTS_WITH_VALUE.has(tokens[i]) ? 2 : 1;
-    if (tokens[i] !== 'commit') continue;
-    for (const t of tokens.slice(i + 1)) {
-      if (/^["']/.test(t) || !/^-[^-]/.test(t)) continue;
-      for (const ch of t.slice(1)) {
-        if (ch === 'n') return true;
-        if (COMMIT_VALUE_FLAGS.has(ch)) break;
-      }
+    let known = true;
+    while (i < tokens.length && tokens[i].startsWith('-')) {
+      const kind = gitGlobalOption(tokens[i]);
+      if (kind === null) { known = false; break; }
+      i += kind === 'value' ? 2 : 1;
+    }
+    // After an unknown option the subcommand could be any later word, so check every "commit".
+    const commits = known ? (tokens[i] === 'commit' ? [i] : []) : tokens.flatMap((t, j) => (j > i && t === 'commit' ? [j] : []));
+    if (commits.some(c => commitArgsSkipHooks(tokens.slice(c + 1)))) return true;
+  }
+  return false;
+}
+function commitArgsSkipHooks(args) {
+  for (const t of args) {
+    if (/^["']/.test(t) || !/^-[^-]/.test(t)) continue;
+    for (const ch of t.slice(1)) {
+      if (ch === 'n') return true;
+      if (COMMIT_VALUE_FLAGS.has(ch)) break;
     }
   }
   return false;
@@ -303,7 +336,9 @@ function gitSubcommand(name, words) {
   if (name !== 'git') return { name: name.slice(4), index: 0 };
   for (let i = 1; i < words.length; i++) {
     if (!words[i].value.startsWith('-')) return { name: words[i].value, index: i };
-    if (GIT_OPTS_WITH_VALUE.has(words[i].value)) i++;
+    const kind = gitGlobalOption(words[i].value);
+    if (kind === null || kind === 'help') return null;
+    if (kind === 'value') i++;
   }
   return null;
 }
@@ -729,7 +764,10 @@ function gitReason(args, ctx, nesting) {
     if (value.startsWith('--config-env=')) { const reason = keyReason({ value: value.slice(13) }); if (reason) return reason; }
     if (value.startsWith('--exec-path=')) return REASON.env('where git finds its commands (--exec-path)');
     if (value === '--git-dir' || value.startsWith('--git-dir=')) return REASON.env('the repository git uses (--git-dir)');
-    if (GIT_OPTS_WITH_VALUE.has(value)) i++;
+    const kind = gitGlobalOption(value);
+    if (kind === null) return REASON.gitOption(value);
+    if (kind === 'help') return null;
+    if (kind === 'value') i++;
   }
   const sub = args[i];
   if (!sub) return null;
