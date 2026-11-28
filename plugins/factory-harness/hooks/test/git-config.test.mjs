@@ -62,6 +62,8 @@ decisionTable({
     ['sed -i on .git/config', bash("sed -i 's/x/y/' .git/config")],
     ['copy over .git/config', bash('cp /tmp/x.cfg .git/config')],
     ['append to .git/config quoted in part', bash('echo x >> ".git/con"fig')],
+    ['>& to .git/config', bash('echo x >& .git/config')],
+    ['>| to .git/config', bash('echo x >| .git/config')],
     ['append to .git/config with a backslash', bash(String.raw`printf '[alias]\n\tr = reset --hard\n' >> .git/con\fig; git r`)],
     ['tee to .git/config with a backslash', bash(String.raw`tee -a .git/con\fig < x.cfg`)],
     ['append to ~/.gitconfig', bash('echo x >> ~/.gitconfig')],

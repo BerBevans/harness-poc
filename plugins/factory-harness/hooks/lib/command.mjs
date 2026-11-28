@@ -212,26 +212,29 @@ export const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', 
 export function gitInvocations(command) {
   const readings = [...invocationsOf(command, 'git'), ...invocationsOf(command, 'git', bashWord)];
   const distinct = [...new Map(readings.map(tokens => [JSON.stringify(tokens), tokens])).values()];
-  return distinct.map(tokens => {
-    let index = 0;
-    let directory = null;
-    const configs = [];
-    const result = (subcommand, from, unknownOption = null) =>
-      ({ subcommand, args: tokens.slice(from), directory, configs, unknownOption });
-    while (index < tokens.length && isOption(tokens[index])) {
-      const option = tokens[index];
-      if (option in GIT_HELP_OPTS) {
-        return result(GIT_HELP_OPTS[option], index + 1);
-      }
-      if (option === '-C') directory = tokens[index + 1] ?? null;
-      if (option === '-c' || option === '--config-env') configs.push(tokens[index + 1] ?? '');
-      if (option.startsWith('--config-env=')) configs.push(option.slice('--config-env='.length));
-      if (GIT_OPTS_WITH_VALUE.has(option)) index += 2;
-      else if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) index += 1;
-      else return result('', index + 1, option);
+  return distinct.map(gitInvocation);
+}
+
+/** One git invocation, from the words after `git`, in the shape gitInvocations returns. */
+function gitInvocation(tokens) {
+  let index = 0;
+  let directory = null;
+  const configs = [];
+  const result = (subcommand, from, unknownOption = null) =>
+    ({ subcommand, args: tokens.slice(from), directory, configs, unknownOption });
+  while (index < tokens.length && isOption(tokens[index])) {
+    const option = tokens[index];
+    if (option in GIT_HELP_OPTS) {
+      return result(GIT_HELP_OPTS[option], index + 1);
     }
-    return result(tokens[index] ?? '', index + 1);
-  });
+    if (option === '-C') directory = tokens[index + 1] ?? null;
+    if (option === '-c' || option === '--config-env') configs.push(tokens[index + 1] ?? '');
+    if (option.startsWith('--config-env=')) configs.push(option.slice('--config-env='.length));
+    if (GIT_OPTS_WITH_VALUE.has(option)) index += 2;
+    else if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) index += 1;
+    else return result('', index + 1, option);
+  }
+  return result(tokens[index] ?? '', index + 1);
 }
 
 /** Short-option clusters such as -fd contain a flag when any of their letters match. */
@@ -268,12 +271,13 @@ export function writeTargets(segment) {
   }
 
   for (const tokens of tokenisations(segment)) {
-    targets.push(...tokenWriteTargets(segment, tokens.map(unquote)), ...tokenWriteTargets(segment, tokens.map(bashWord)));
+    targets.push(...tokenWriteTargets(tokens.map(unquote)), ...tokenWriteTargets(tokens.map(bashWord)));
   }
   return targets;
 }
 
-function tokenWriteTargets(segment, tokens) {
+// The paths a simple command's words name as written, deleted or overwritten, by program.
+function tokenWriteTargets(tokens) {
   const targets = [];
   const start = tokens.findIndex(t => !isEnvAssignment(t) && t !== 'sudo');
   if (start < 0) return targets;
@@ -291,12 +295,33 @@ function tokenWriteTargets(segment, tokens) {
   if (EDITS_IN_PLACE.has(program) && args.some(a => /^(-[A-Za-z]*i|--in-place)/.test(a))) targets.push(...plainArgs);
   if (program === 'dd') targets.push(...args.filter(a => a.startsWith('of=')).map(a => a.slice(3)));
   if (program === 'git') {
-    const [git] = gitInvocations(segment);
-    if (git && GIT_SUBCOMMANDS_THAT_WRITE_PATHS.has(git.subcommand)) targets.push(...git.args.filter(a => !isOption(a)));
+    const git = gitInvocation(args);
+    if (GIT_SUBCOMMANDS_THAT_WRITE_PATHS.has(git.subcommand)) targets.push(...git.args.filter(a => !isOption(a)));
   }
 
   return targets;
 }
 
-/** Write targets across every segment of a command. */
-export const commandWriteTargets = command => splitSegments(command).flatMap(writeTargets);
+// Redirections that write to a file (>&2 copies a descriptor and >&- closes one).
+const WRITE_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>', '>&', '<>']);
+const isNullDevice = target => /^(\/dev\/null|\$null|nul)$/i.test(target);
+
+/**
+ * The bash parser's reading of the write targets: every simple command at any depth, its writing
+ * redirections (>| and >&file included) and its words by program, following bash -c lines.
+ * Nothing for a command the parser can't read (the guard denies such bash).
+ */
+function parsedWriteTargets(command, depth = 0) {
+  if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
+  return (parse(command).commands ?? []).flatMap(c => {
+    const words = c.words.map(w => w.value);
+    const redirected = c.redirects
+      .filter(r => WRITE_REDIRECTS.has(r.op) && !(r.op === '>&' && /^(\d+|-)$/.test(r.target.value)))
+      .map(r => r.target.value);
+    return [...redirected, ...tokenWriteTargets(words),
+      ...nestedShellCommandLines(words).flatMap(({ line }) => parsedWriteTargets(line, depth + 1))];
+  }).filter(target => !isNullDevice(target));
+}
+
+/** Write targets across every segment of a command, read by the text rules and by the bash parser. */
+export const commandWriteTargets = command => [...splitSegments(command).flatMap(writeTargets), ...parsedWriteTargets(command)];
