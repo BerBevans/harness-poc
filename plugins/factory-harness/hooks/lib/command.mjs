@@ -101,7 +101,7 @@ export const GIT_FLAG_OPTS = new Set(['-p', '-P', '--paginate', '--no-pager', '-
 export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
   '--attr-source=', '--exec-path=', '--list-cmds='];
 // These end option parsing: git runs `git help` or `git version` with whatever follows.
-const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version' };
+export const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version' };
 
 /**
  * Every git invocation: { subcommand, args, directory, unknownOption }. directory is the -C value,

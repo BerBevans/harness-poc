@@ -64,7 +64,7 @@ export const GIT_FLAG_OPTS = new Set(['-p', '-P', '--paginate', '--no-pager', '-
 export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', '--config-env=', '--super-prefix=',
   '--attr-source=', '--exec-path=', '--list-cmds='];
 // These end option parsing: git runs `git help` or `git version` with whatever follows.
-const GIT_HELP_OPTS = new Set(['-h', '--help', '-v', '--version']);
+export const GIT_HELP_OPTS = new Set(['-h', '--help', '-v', '--version']);
 
 /** How git reads a global option: 'value' (takes the next word), 'flag', 'help' (help or version runs), or null (unknown). */
 export function gitGlobalOption(option) {
