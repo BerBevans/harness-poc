@@ -49,7 +49,7 @@ function printsEnvironment(command) {
     const [program, ...args] = tokens.map(unquote);
     if (program === 'printenv') return true;
     if (program === 'env') return args.every(arg => arg.startsWith('-') || /^[A-Za-z_]\w*=/.test(arg));
-    const listing = LISTS_VARIABLES[program];
+    const listing = Object.hasOwn(LISTS_VARIABLES, program) ? LISTS_VARIABLES[program] : undefined;
     return listing !== undefined && (args.length === 0 || (args.length === 1 && listing.includes(args[0])));
   });
 }

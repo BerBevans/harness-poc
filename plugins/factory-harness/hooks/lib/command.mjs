@@ -291,24 +291,37 @@ const WRAPPERS = {
   flock: { values: ['-w', '--timeout', '-E', '--conflict-exit-code'], skip: 1 },
 };
 
-/** The command a simple command runs, and the one each wrapper in front of it runs in turn. */
+/**
+ * The command a simple command runs, and the one each wrapper in front of it runs in turn. Every
+ * pass uses up at least one word, so the loop ends without a cap. env -S's string is a command too.
+ */
 function wrappedCommands(tokens) {
   const found = [];
   let rest = tokens;
-  for (let depth = 0; depth < 8; depth++) {
+  for (;;) {
     rest = rest.slice(Math.max(0, rest.findIndex(t => !isEnvAssignment(t))));
     if (rest.length === 0 || rest.every(isEnvAssignment)) break;
     found.push(rest);
-    const wrapper = WRAPPERS[programName(rest[0])];
+    const name = programName(rest[0]);
+    const wrapper = Object.hasOwn(WRAPPERS, name) ? WRAPPERS[name] : null;
     if (!wrapper) break;
     let i = 1;
     while (i < rest.length && rest[i].startsWith('-')) {
       if (rest[i] === '--') { i++; break; }
+      const split = name === 'env' ? envSplitString(rest[i], rest[i + 1]) : null;
+      if (split !== null) found.push(...wrappedCommands(tokenise(split).map(unquote)));
       i += wrapper.values.includes(rest[i]) ? 2 : 1;
     }
     rest = rest.slice(i + (wrapper.skip ?? 0));
   }
   return found;
+}
+
+// The string env -S (--split-string) splits into a command, attached or separate, or null.
+function envSplitString(option, next) {
+  if (option === '-S' || option === '--split-string') return next ?? '';
+  const attached = option.match(/^(?:-S|--split-string=)(.+)$/s);
+  return attached ? attached[1] : null;
 }
 
 // The paths one command's words name as written, deleted or overwritten, by program.
