@@ -221,3 +221,11 @@ test('inputs bash runs are seen or refused', async t => {
     });
   }
 });
+
+// The factory plugin ships on its own, so it carries a copy of this parser. Change both together.
+test('the plugin carries a byte-identical copy of the parser', async () => {
+  const { readFileSync } = await import('node:fs');
+  const here = readFileSync(new URL('./shell-parse.mjs', import.meta.url));
+  const plugin = readFileSync(new URL('../../plugins/factory-harness/hooks/lib/shell-parse.mjs', import.meta.url));
+  assert.ok(here.equals(plugin), 'plugins/factory-harness/hooks/lib/shell-parse.mjs differs from workstation/claude/shell-parse.mjs');
+});
