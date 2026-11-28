@@ -276,14 +276,46 @@ export function writeTargets(segment) {
   return targets;
 }
 
-// The paths a simple command's words name as written, deleted or overwritten, by program.
-function tokenWriteTargets(tokens) {
-  const targets = [];
-  const start = tokens.findIndex(t => !isEnvAssignment(t) && t !== 'sudo');
-  if (start < 0) return targets;
+// The paths a simple command's words name as written, deleted or overwritten. Each command it
+// runs is checked, whatever wraps it.
+const tokenWriteTargets = tokens => wrappedCommands(tokens).flatMap(programWriteTargets);
 
-  const program = programName(tokens[start]);
-  const args = tokens.slice(start + 1);
+// Commands that run the command after their options, as the workstation guard lists them. `values`:
+// options taking a separate value; `skip`: positional words before the command (timeout's duration).
+const WRAPPERS = {
+  command: { values: [] }, builtin: { values: [] }, exec: { values: ['-a'] }, nohup: { values: [] }, time: { values: [] },
+  nice: { values: ['-n', '--adjustment'] }, timeout: { values: ['-s', '--signal', '-k', '--kill-after'], skip: 1 },
+  stdbuf: { values: ['-i', '-o', '-e'] }, setsid: { values: [] }, env: { values: ['-u', '--unset', '-C', '--chdir', '-S', '--split-string'] },
+  sudo: { values: ['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-T'] }, doas: { values: ['-u', '-C'] },
+  xargs: { values: ['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s', '--arg-file', '--delimiter', '--max-args', '--max-procs'] },
+  flock: { values: ['-w', '--timeout', '-E', '--conflict-exit-code'], skip: 1 },
+};
+
+/** The command a simple command runs, and the one each wrapper in front of it runs in turn. */
+function wrappedCommands(tokens) {
+  const found = [];
+  let rest = tokens;
+  for (let depth = 0; depth < 8; depth++) {
+    rest = rest.slice(Math.max(0, rest.findIndex(t => !isEnvAssignment(t))));
+    if (rest.length === 0 || rest.every(isEnvAssignment)) break;
+    found.push(rest);
+    const wrapper = WRAPPERS[programName(rest[0])];
+    if (!wrapper) break;
+    let i = 1;
+    while (i < rest.length && rest[i].startsWith('-')) {
+      if (rest[i] === '--') { i++; break; }
+      i += wrapper.values.includes(rest[i]) ? 2 : 1;
+    }
+    rest = rest.slice(i + (wrapper.skip ?? 0));
+  }
+  return found;
+}
+
+// The paths one command's words name as written, deleted or overwritten, by program.
+function programWriteTargets(tokens) {
+  const targets = [];
+  const program = programName(tokens[0]);
+  const args = tokens.slice(1);
   const plainArgs = args.filter(a => !isOption(a));
 
   if (DELETES_OR_OVERWRITES_ALL_ARGS.has(program)) targets.push(...plainArgs);
