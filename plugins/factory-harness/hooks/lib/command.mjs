@@ -1,5 +1,10 @@
 // Text-level parsing of shell commands (bash and PowerShell). This is pattern matching,
-// not a shell parser: it catches the ordinary spellings and CI catches the rest.
+// not a shell parser: it catches the ordinary spellings and CI catches the rest. The plugin is
+// moving onto the bash parser in shell-parse.mjs in slices; until then the parser's reading is
+// added alongside these (a union, so it can only block more), and these are frozen except for
+// regressions.
+
+import { parseShell } from './shell-parse.mjs';
 
 // Shells whose -c (or -Command) argument is itself a command line.
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd']);
@@ -121,7 +126,65 @@ export function invocationsOf(command, program, read = unquote) {
       if (index >= 0) found.push(tokens.slice(index + 1).map(read));
     }
   }
+  for (const words of parsedCommandWords(command)) {
+    const index = words.findIndex(w => programName(w, w => w) === program);
+    if (index >= 0) found.push(words.slice(index + 1));
+  }
   return found;
+}
+
+/**
+ * Bash's own reading of the command: every simple command at any depth, as the words bash passes
+ * (quotes removed, $'...' decoded), following `bash -c '...'` and the like as splitSegments does.
+ * Nothing for a line the parser can't read (parseError says why, and the guard denies such bash);
+ * nesting deeper than MAX_DEPTH throws, so the guard fails closed.
+ */
+export function parsedCommandWords(command, depth = 0) {
+  if (depth > MAX_DEPTH) throw new Error(`the command nests commands more than ${MAX_DEPTH} deep`);
+  const { commands } = parse(command);
+  return (commands ?? []).flatMap(c => {
+    const words = c.words.map(w => w.value);
+    return [words, ...nestedShellCommandLines(words).flatMap(({ line }) => parsedCommandWords(line, depth + 1))];
+  });
+}
+
+/**
+ * Why the bash parser can't read the command, or a bash -c line inside it, or null when it can.
+ * Lines given to pwsh, powershell or cmd aren't bash, so they're left to the text rules.
+ */
+export function parseError(command, depth = 0) {
+  if (depth > MAX_DEPTH) return `the command nests commands more than ${MAX_DEPTH} deep`;
+  const { commands, error } = parse(command);
+  if (error) return error;
+  for (const c of commands ?? []) {
+    for (const { shell, line } of nestedShellCommandLines(c.words.map(w => w.value))) {
+      const nested = NOT_BASH.has(shell) ? null : parseError(line, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+// Each rule parses the same command, so the parser's result is kept for the last few commands.
+const parsed = new Map();
+function parse(command) {
+  if (!parsed.has(command)) {
+    if (parsed.size > 50) parsed.clear();
+    try { parsed.set(command, { commands: parseShell(command).commands }); } catch (error) { parsed.set(command, { error: error.message }); }
+  }
+  return parsed.get(command);
+}
+
+const NOT_BASH = new Set(['pwsh', 'powershell', 'cmd']);
+
+// The command line given to a shell's -c (as nestedShellCommands follows it), with the name of the
+// nearest shell before it (pwsh -Command bash -c '...' gives bash the line).
+function nestedShellCommandLines(words) {
+  const shells = words.map(w => programName(w, w => w)).map(name => SHELLS.has(name) ? name : null);
+  return words.flatMap((w, i) => {
+    const shell = shells.slice(0, i).findLast(Boolean);
+    return shell && words[i + 1] !== undefined && /^(-[a-z]*c[a-z]*|\/c)$/i.test(w) ? [{ shell, line: words[i + 1] }] : [];
+  });
 }
 
 // git's global options (git.c handle_options), kept the same as the workstation guard's lists, which
