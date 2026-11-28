@@ -18,7 +18,8 @@ const ALIAS_KEY = /^\^?(alias|include|includeif)(\.|\\|$)/i;
 // GIT_CONFIG, GIT_CONFIG_COUNT, _KEY_n, _VALUE_n, _PARAMETERS, _GLOBAL, _SYSTEM, _NOSYSTEM and any
 // git adds later, in any spelling: `X=1 git`, `export`, `unset`, `env -u`, `$env:` and the rest.
 // Not part of a longer name or a file name (`git_config.cs`); PowerShell's Env:\GIT_CONFIG_COUNT counts.
-const GIT_CONFIG_VARIABLE = /(?<![\w.-])GIT_CONFIG\w*(?![\w.])/i;
+// A name attached to an option (env -uGIT_CONFIG_COUNT, -SGIT_CONFIG_PARAMETERS=...) counts too.
+const GIT_CONFIG_VARIABLE = /(?:(?<![\w.-])|(?<=(?:^|[\s'"])-[A-Za-z]*))GIT_CONFIG\w*(?![\w.])/i;
 
 // git's config files: the repository's (.git/config, config.worktree, and the same under
 // .git/worktrees and .git/modules), ~/.gitconfig, $XDG_CONFIG_HOME/git/config and /etc/gitconfig.

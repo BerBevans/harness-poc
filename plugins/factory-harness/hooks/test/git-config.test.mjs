@@ -45,6 +45,8 @@ decisionTable({
     ['a lower-case spelling', bash('git_config_count=0 git status')],
     ['a name quoted in part', bash("env GIT''_CONFIG_COUNT=1 GIT''_CONFIG_KEY_0=alias.r GIT''_CONFIG_VALUE_0='reset --hard' git r")],
     ['a name with a backslash', bash(String.raw`export G\IT_CONFIG_COUNT=1; git status`)],
+    ['a name attached to env -u', bash('env -uGIT_CONFIG_COUNT git status')],
+    ['a name attached to env -S', bash(String.raw`env -SGIT_CONFIG_PARAMETERS=\'alias.r=reset\'\ git\ r`)],
     ['$env:GIT_CONFIG_COUNT in PowerShell', powershell('$env:GIT_CONFIG_COUNT = 0; git status')],
     ['Remove-Item Env:\\GIT_CONFIG_COUNT', powershell(String.raw`Remove-Item Env:\GIT_CONFIG_COUNT; git status`)],
     ['Remove-Item Env:GIT_CONFIG_COUNT', powershell('Remove-Item Env:GIT_CONFIG_COUNT; git status')],
