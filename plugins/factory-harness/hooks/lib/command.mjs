@@ -64,11 +64,14 @@ export function splitSegments(command, depth = 0) {
   return segments;
 }
 
-export const tokenise = segment => segment.match(/"(?:[^"\\]|\\.)*"|'[^']*'|\S+/g) ?? [];
+// A word is quoted and unquoted parts run together, as in bash: `-c user.name='a b'` is one word.
+// A quote with no closing quote counts as an ordinary character.
+const QUOTED_PART = /"((?:[^"\\]|\\.)*)"|'([^']*)'/g;
+export const tokenise = segment => segment.match(/(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s"']|["'])+/g) ?? [];
 
-// Inside double quotes, bash unescapes \" and \\.
-export const unquote = token =>
-  /^".*"$/s.test(token) ? token.slice(1, -1).replace(/\\(["\\$`])/g, '$1') : token.replace(/^'(.*)'$/s, '$1');
+// Removes the quotes from every quoted part. Inside double quotes, bash unescapes \", \\, \$ and \`.
+export const unquote = token => token.replace(QUOTED_PART,
+  (_, doubled, single) => doubled === undefined ? single : doubled.replace(/\\(["\\$`])/g, '$1'));
 
 const isOption = token => /^-/.test(token);
 const isEnvAssignment = token => /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
@@ -104,25 +107,31 @@ export const GIT_ATTACHED_OPTS = ['--git-dir=', '--work-tree=', '--namespace=', 
 export const GIT_HELP_OPTS = { '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version' };
 
 /**
- * Every git invocation: { subcommand, args, directory, unknownOption }. directory is the -C value,
- * if any. unknownOption is a global option git may not know, after which the subcommand can't be
- * told; subcommand is then ''.
+ * Every git invocation: { subcommand, args, directory, configs, unknownOption }. directory is the -C
+ * value, if any. configs are the -c and --config-env values (`key=value`), up to the subcommand.
+ * unknownOption is a global option git may not know, after which the subcommand can't be told;
+ * subcommand is then ''.
  */
 export function gitInvocations(command) {
   return invocationsOf(command, 'git').map(tokens => {
     let index = 0;
     let directory = null;
+    const configs = [];
+    const result = (subcommand, from, unknownOption = null) =>
+      ({ subcommand, args: tokens.slice(from), directory, configs, unknownOption });
     while (index < tokens.length && isOption(tokens[index])) {
       const option = tokens[index];
       if (option in GIT_HELP_OPTS) {
-        return { subcommand: GIT_HELP_OPTS[option], args: tokens.slice(index + 1), directory, unknownOption: null };
+        return result(GIT_HELP_OPTS[option], index + 1);
       }
       if (option === '-C') directory = tokens[index + 1] ?? null;
+      if (option === '-c' || option === '--config-env') configs.push(tokens[index + 1] ?? '');
+      if (option.startsWith('--config-env=')) configs.push(option.slice('--config-env='.length));
       if (GIT_OPTS_WITH_VALUE.has(option)) index += 2;
       else if (GIT_FLAG_OPTS.has(option) || GIT_ATTACHED_OPTS.some(prefix => option.startsWith(prefix))) index += 1;
-      else return { subcommand: '', args: tokens.slice(index + 1), directory, unknownOption: option };
+      else return result('', index + 1, option);
     }
-    return { subcommand: tokens[index] ?? '', args: tokens.slice(index + 1), directory, unknownOption: null };
+    return result(tokens[index] ?? '', index + 1);
   });
 }
 

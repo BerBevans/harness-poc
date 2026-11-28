@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createContext, evaluate } from '../guard.mjs';
-import { splitSegments } from '../lib/command.mjs';
+import { splitSegments, tokenise, unquote } from '../lib/command.mjs';
 import { collapseDots } from '../lib/paths.mjs';
 
 decisionTable({
@@ -50,6 +50,11 @@ decisionTable({
     ['bash -c with a harmless command', bash('bash -c "dotnet build"')],
     ['redirects that use &', bash('dotnet build 2>&1 | tee build.log >&2')],
   ],
+});
+
+test('a word is its quoted and unquoted parts run together, as in bash', () => {
+  const words = tokenise(`git -c user.name='a b' x"y z"'w' "q\\"r" 'it'"'"'s' lone"quote`).map(unquote);
+  assert.deepEqual(words, ['git', '-c', 'user.name=a b', 'xy zw', 'q"r', "it's", 'lone"quote']);
 });
 
 test('collapseDots handles leading .., drive letters and the root', () => {

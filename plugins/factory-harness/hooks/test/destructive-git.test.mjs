@@ -21,6 +21,9 @@ decisionTable({
     ['push after --attr-source and its value', bash('git --attr-source x push -f')],
     ['push after --shallow-file and its value', bash('git --shallow-file x push -f')],
     ['push after --super-prefix and its value', bash('git --super-prefix x push -f')],
+    // A quoted part inside a word is still one word, so the value's space doesn't end it.
+    ['push after a -c value quoted mid-word', bash("git -c user.name='a b' push -f origin feature/42")],
+    ['reset --hard after a -c value quoted mid-word', bash('git -c user.name="a b" reset --hard')],
     // Fail closed: after a global option the guard doesn't know, the subcommand can't be told.
     ['push after an unknown global option', bash('git --future-opt x push -f')],
     ['an unknown global option before a harmless subcommand', bash('git --future-opt x status')],
@@ -43,6 +46,7 @@ decisionTable({
     ['gh pr merge', bash('gh pr merge 42 --squash')],
   ],
   allowed: [
+    ['commit after a -c value quoted mid-word', bash("git -c user.name='Jane Doe' commit -m 'Add task'")],
     ['push a feature branch', bash('git push -u origin feature/42-add-task')],
     ['bare push from a feature branch', bash('git push')],
     ['reset --soft', bash('git reset --soft HEAD~1')],

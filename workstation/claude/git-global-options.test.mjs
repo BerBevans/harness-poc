@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { GIT_ATTACHED_OPTS, GIT_FLAG_OPTS, GIT_HELP_OPTS, GIT_OPTS_WITH_VALUE, decide } from './guard-git-hooks.mjs';
 import * as plugin from '../../plugins/factory-harness/hooks/lib/command.mjs';
+import { evaluate as pluginEvaluate } from '../../plugins/factory-harness/hooks/guard.mjs';
 
 const MIN_VERSION = { '--no-lazy-fetch': [2, 44], '--no-advice': [2, 46] };
 // A value each value-taking option accepts, so `git <option> <value> version` succeeds.
@@ -91,3 +92,31 @@ test('the plugin lists the same git global options', () => {
   assert.deepEqual([...plugin.GIT_ATTACHED_OPTS].sort(), [...GIT_ATTACHED_OPTS].sort());
   assert.deepEqual(Object.keys(plugin.GIT_HELP_OPTS).sort(), [...GIT_HELP_OPTS].sort());
 });
+
+// Every way to define an alias that both guards deny, checked against the real git: each defines
+// `v` as an alias for `version`, so git printing its version proves git honoured the route. The
+// command is the same route written as an agent would type it.
+const includeFile = path.join(cwd, 'alias.cfg');
+fs.writeFileSync(includeFile, '[alias]\n\tv = version\n');
+const ALIAS_ROUTES = [
+  { name: '-c', args: ['-c', 'alias.v=version', 'v'], command: 'git -c alias.v=version v' },
+  { name: '-c with a mixed-case section', args: ['-c', 'Alias.v=version', 'v'], command: 'git -c Alias.v=version v' },
+  { name: '--config-env', args: ['--config-env', 'alias.v=ALIAS_CMD', 'v'], env: { ALIAS_CMD: 'version' },
+    command: 'ALIAS_CMD=version git --config-env alias.v=ALIAS_CMD v' },
+  { name: 'include.path with -c', args: ['-c', `include.path=${includeFile}`, 'v'], command: 'git -c include.path=/tmp/alias.cfg v' },
+  { name: 'GIT_CONFIG_PARAMETERS', args: ['v'], env: { GIT_CONFIG_PARAMETERS: "'alias.v=version'" },
+    command: "GIT_CONFIG_PARAMETERS=\"'alias.v=version'\" git v" },
+  { name: 'GIT_CONFIG_COUNT and KEY_0', args: ['v'], env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'alias.v', GIT_CONFIG_VALUE_0: 'version' },
+    command: 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.v GIT_CONFIG_VALUE_0=version git v' },
+];
+const pluginContext = { home: '/home/dev', env: {}, readFile: () => null, currentBranch: () => 'feature/x' };
+for (const route of ALIAS_ROUTES) {
+  test(`git honours an alias defined with ${route.name}, and both guards deny it`, () => {
+    const run = spawnSync('git', route.args, { cwd, encoding: 'utf8', env: { ...process.env, ...route.env } });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /git version/);
+    const input = { tool_name: 'Bash', tool_input: { command: route.command }, cwd };
+    assert.ok(pluginEvaluate(input, pluginContext), 'the plugin allowed it');
+    assert.ok(decide(input, { home: '/home/dev' }), 'the workstation guard allowed it');
+  });
+}
