@@ -302,7 +302,7 @@ function tokenWriteTargets(tokens) {
   return targets;
 }
 
-// Redirections that write to a file (>&2 and >&- only move descriptors).
+// Redirections that write to a file (>&2 copies a descriptor and >&- closes one).
 const WRITE_REDIRECTS = new Set(['>', '>>', '>|', '&>', '&>>', '>&', '<>']);
 const isNullDevice = target => /^(\/dev\/null|\$null|nul)$/i.test(target);
 

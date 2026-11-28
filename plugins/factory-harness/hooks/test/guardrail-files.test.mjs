@@ -13,6 +13,7 @@ decisionTable({
     ['>| redirect', bash('echo x >| .editorconfig')],
     ['>& redirect to a file', bash('echo x >& Directory.Build.props')],
     ['&>> redirect', bash('dotnet build &>> Directory.Build.props')],
+    ['<> redirect (opens the file read-write)', bash('echo x <> .editorconfig')],
     ['rm after a here-document whose prose has an apostrophe',
       bash("cat > notes.md <<'EOF'\nthe docs' note\nEOF\nrm Directory.Build.props")],
     ['rm inside bash -c after an apostrophe', bash(`bash -c "echo it's; rm global.json"`)],
@@ -71,6 +72,7 @@ decisionTable({
   ],
   allowed: [
     ['>& to a descriptor', bash('dotnet build >&2 2>&1 | tee build.log')],
+    ['>&- closes a descriptor', bash('dotnet build 2>&- | tee build.log')],
     ['>& to a log file', bash('dotnet build >& build.log')],
     ['Read of .editorconfig', read(inRepo('.editorconfig'))],
     ['cat of Directory.Build.props', bash('cat Directory.Build.props')],
