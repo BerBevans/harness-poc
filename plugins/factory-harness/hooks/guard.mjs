@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { describeChange } from './lib/change.mjs';
 import { denyToolUse, isEntryPoint, parseInput, readStdin, writeOutput } from './lib/hook-io.mjs';
 import { nextStepAfterBlock } from './lib/next-step.mjs';
+import { parseError } from './lib/command.mjs';
 import * as claudeConfig from './rules/claude-config.mjs';
 import * as guardrailFiles from './rules/guardrail-files.mjs';
 import * as secrets from './rules/secrets.mjs';
@@ -24,6 +25,14 @@ export function evaluate(input, context) {
   for (const rule of RULES) {
     const reason = rule.check(change, context);
     if (reason) return reason;
+  }
+  // Bash the parser can't read could hide a command from the rules' bash reading, so it's denied.
+  // PowerShell is left to the text rules.
+  const unreadable = change.tool === 'Bash' && change.command ? parseError(change.command) : null;
+  if (unreadable) {
+    return `Blocked: the guard couldn't read this command as bash (${unreadable}), so it can't tell what it runs. ` +
+      'Write it out plainly (simpler quoting, a file for long scripts) and try again. If it can\'t be written so the ' +
+      `guard can read it, stop. ${nextStepAfterBlock(context.env)}`;
   }
   return null;
 }

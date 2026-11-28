@@ -65,6 +65,13 @@ test('an escaped quote is a character, and bashWord reads a word the way bash do
   assert.equal(bashWord(String.raw`$'a\x62\143\n'`), 'abc\n');
 });
 
+test('bash the parser can\'t read is denied with a rewrite hint; PowerShell is left to the text rules', () => {
+  const reason = evaluate(bash('echo "unterminated'), fakeContext());
+  assert.match(reason, /couldn't read this command as bash \(unterminated double quote/);
+  assert.match(reason, /Write it out plainly/);
+  assert.equal(evaluate(powershell('Write-Host "unterminated'), fakeContext()), null);
+});
+
 test('collapseDots handles leading .., drive letters and the root', () => {
   assert.equal(collapseDots('c:/a/../../b'), 'c:/b');
   assert.equal(collapseDots('../a/./b//c'), '../a/b/c');

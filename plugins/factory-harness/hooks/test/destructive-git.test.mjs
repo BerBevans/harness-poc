@@ -28,6 +28,13 @@ decisionTable({
     // An apostrophe in a here-document's prose must not hide the command after it.
     ['push -f after a here-document with an apostrophe',
       bash("git commit -F - <<'EOF'\nFix the docs' examples\nEOF\ngit push -f origin feature/42 && echo 'done'")],
+    // The bash parser's reading: the here-document is data, so the push after it is seen even
+    // when the prose names git first (the regex reading checks only the first git per segment).
+    ['push -f after a here-document whose prose names git',
+      bash("git commit -F - <<'EOF'\nFix the docs' git examples\nEOF\ngit push -f origin feature/42 && echo 'done'")],
+    ['push to main after a here-document whose prose names git',
+      bash("cat >> log.md <<'EOF'\nThe twin's git note\nEOF\ngit add log.md && git commit -qm x && git push -q origin main")],
+    ['reset --hard in bash -c after an apostrophe', bash(`bash -c "echo it's; git reset --hard"`)],
     // bash reads re\set as reset, and $'...' as its body with the escapes decoded.
     ['a backslash inside the subcommand', bash(String.raw`git re\set --hard`)],
     ['a backslash inside the program name', bash(String.raw`g\it reset --hard`)],
