@@ -42,7 +42,9 @@ const REASON = {
   unparsed: detail => `Blocked: the guard couldn't parse this command (${detail}), so it failed closed. ${REWRITE_STEP}`,
   unseen: what => `Blocked: this runs code the guard can't see (${what}). ${REWRITE_STEP}`,
   gitOption: option => `Blocked: "${option}" isn't on the guard's list of git's global options, so it can't tell ` +
-    `which git subcommand runs. If git accepts it, the guard's list needs it added. ${NEXT_STEP}`,
+    `which git subcommand runs. If git accepts it, the guard's list needs it added. The guard checks the word git ` +
+    `wherever it appears, so if this isn't a git call (grep -rn git --include=...), put the other program's ` +
+    `options before the word git. ${NEXT_STEP}`,
 };
 
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -50,7 +52,7 @@ const MAX_NESTING = 4;
 
 // git's global options that take their value as the next word (git.c handle_options), e.g. `git -C dir commit`. `--shallow-file` is
 // undocumented, and `--super-prefix` has gone from newer gits but costs nothing to keep.
-const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
+export const GIT_OPTS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env',
   '--super-prefix', '--attr-source', '--shallow-file']);
 // The rest of git's global options. git matches them exactly (no abbreviations or clusters, checked
 // on 2.43) and rejects any other, so an option missing from these lists is denied, not skipped: a

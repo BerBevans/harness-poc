@@ -17,6 +17,8 @@ export const blocked = [
   ['a clustered global option (git rejects it)', 'git -pP log -1'],
   ['-C with an attached value (git rejects it)', 'git -Cdir status'],
   ['--shallow-file with an attached value (git rejects it)', 'git --shallow-file=x commit -n -m y'],
+  // Deliberate false positive: git is checked wherever it appears, so an unknown wrapper can't hide it.
+  ['the word git followed by another program\'s option', 'grep -rn git --include=*.yml .'],
   ['commit -n inside a function body', 'g() { git commit -n -m x; }; g'],
   ['commit -n in an unquoted here-document substitution', 'cat <<EOF\n$(git commit -n -m x)\nEOF'],
   ['a glob argument to commit', 'git commit -m x *'],
