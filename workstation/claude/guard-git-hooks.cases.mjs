@@ -9,6 +9,14 @@ export const blocked = [
   ['commit -n through a wrapper', 'nice -n 5 git commit -n -m x'],
   ['commit -n after --attr-source and its value', 'git --attr-source x commit -n -m y'],
   ['commit -n after --shallow-file and its value', 'git --shallow-file x commit -n -m y'],
+  // Fail closed on git global options the guard doesn't know: one git adds later could take a value.
+  ['commit -n after an unknown global option', 'git --future-opt x commit -n -m y'],
+  ['an unknown global option before a harmless subcommand', 'git --future-opt x status'],
+  ['an unknown attached global option', 'git --future-opt=x status'],
+  ['an abbreviated global option (git rejects it)', 'git --no-pag log -1'],
+  ['a clustered global option (git rejects it)', 'git -pP log -1'],
+  ['-C with an attached value (git rejects it)', 'git -Cdir status'],
+  ['--shallow-file with an attached value (git rejects it)', 'git --shallow-file=x commit -n -m y'],
   ['commit -n inside a function body', 'g() { git commit -n -m x; }; g'],
   ['commit -n in an unquoted here-document substitution', 'cat <<EOF\n$(git commit -n -m x)\nEOF'],
   ['a glob argument to commit', 'git commit -m x *'],
@@ -214,6 +222,14 @@ export const blocked = [
 ];
 
 export const allowed = [
+  // git global options the guard knows.
+  ['flag-only global options', 'git --no-pager -P --no-optional-locks --literal-pathspecs log -1'],
+  ['global options newer than local git', 'git --no-advice --no-lazy-fetch status'],
+  ['attached global option values', 'git --attr-source=HEAD --namespace=x --work-tree=. log -1'],
+  ['--list-cmds with its value', 'git --list-cmds=main'],
+  ['a value-taking global option with its value', 'git --attr-source HEAD log -1'],
+  ['--version before a subcommand (git runs version)', 'git --version status'],
+  ['--help before a subcommand (git runs help)', 'git --help commit'],
   // False positives of the pattern-matching guard.
   ['a commit message naming the flag', 'git commit -m "Explain why --no-verify is blocked"'],
   ['a PR body naming the flag through the here-document idiom', `gh pr create --title t --body "$(cat <<'EOF'\nExplain --no-verify\nEOF\n)"`],
