@@ -88,8 +88,10 @@ export function invocationsOf(command, program) {
   return found;
 }
 
-// git global options that take a separate value, e.g. `git -C dir commit`.
-const GIT_OPTIONS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env']);
+// git's global options that take their value as the next word (git.c handle_options), e.g. `git -C dir commit`.
+// `--shallow-file` is undocumented, and `--super-prefix` has gone from newer gits but costs nothing to keep.
+const GIT_OPTIONS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace', '--config-env',
+  '--super-prefix', '--attr-source', '--shallow-file']);
 
 /** Every git invocation: { subcommand, args, directory } where directory is the -C value, if any. */
 export function gitInvocations(command) {
