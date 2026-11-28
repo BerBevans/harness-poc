@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createContext, evaluate } from '../guard.mjs';
-import { bashWord, splitSegments, tokenise, unquote } from '../lib/command.mjs';
+import { bashWord, parseError, parsedCommandWords, splitSegments, tokenise, unquote } from '../lib/command.mjs';
 import { collapseDots } from '../lib/paths.mjs';
 
 decisionTable({
@@ -70,6 +70,22 @@ test('bash the parser can\'t read is denied with a rewrite hint; PowerShell is l
   assert.match(reason, /couldn't read this command as bash \(unterminated double quote/);
   assert.match(reason, /Write it out plainly/);
   assert.equal(evaluate(powershell('Write-Host "unterminated'), fakeContext()), null);
+});
+
+test('a bash -c line the parser can\'t read is denied too; a pwsh -Command line is left to the text rules', () => {
+  assert.match(evaluate(bash(`bash -c 'echo "unterminated; ls'`), fakeContext()), /couldn't read this command as bash/);
+  assert.equal(evaluate(bash(`pwsh -Command 'Write-Host "a\`"b"'`), fakeContext()), null);
+});
+
+test('only the parser follows a bash -c after a here-document whose prose has an apostrophe', () => {
+  assert.ok(evaluate(bash("cat > n.md <<'EOF'\nthe docs' git note\nEOF\nbash -c 'git reset --hard'"), fakeContext()));
+});
+
+test('nesting too deep for the parser\'s reading makes the guard fail closed', () => {
+  let command = 'git status';
+  for (let i = 0; i < 6; i++) command = `bash -c ${JSON.stringify(command)}`;
+  assert.throws(() => parsedCommandWords(command), /nests commands more than 4 deep/);
+  assert.match(parseError(command), /nests commands more than 4 deep/);
 });
 
 test('collapseDots handles leading .., drive letters and the root', () => {
