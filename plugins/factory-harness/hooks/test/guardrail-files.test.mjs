@@ -49,6 +49,7 @@ decisionTable({
     ['mv of global.json', bash('mv global.json global.json.bak')],
     ['tee into nuget.config', bash('echo x | tee nuget.config')],
     ['git checkout of a guardrail from another branch', bash('git checkout other -- .editorconfig')],
+    ['git checkout of a guardrail after --attr-source and its value', bash('git --attr-source x checkout other -- .editorconfig')],
     ['git rm of an architecture test', bash('git rm tests/Tasks.ArchitectureTests/LayerTests.cs')],
     ['PowerShell Set-Content', powershell('Set-Content -Path .editorconfig -Value "root = true"')],
     ['PowerShell Remove-Item', powershell('Remove-Item .\\.github\\workflows\\ci.yml')],
