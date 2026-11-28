@@ -8,7 +8,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { GIT_FLAG_OPTS, GIT_OPTS_WITH_VALUE, decide } from './guard-git-hooks.mjs';
+import { GIT_ATTACHED_OPTS, GIT_FLAG_OPTS, GIT_HELP_OPTS, GIT_OPTS_WITH_VALUE, decide } from './guard-git-hooks.mjs';
+import * as plugin from '../../plugins/factory-harness/hooks/lib/command.mjs';
 
 const MIN_VERSION = { '--no-lazy-fetch': [2, 44], '--no-advice': [2, 46] };
 // A value each value-taking option accepts, so `git <option> <value> version` succeeds.
@@ -56,6 +57,15 @@ test('-v and --version end option parsing: git runs version with the rest', () =
   for (const option of ['-v', '--version']) assert.match(git(option, 'status').stdout, /git version/, option);
 });
 
+// `git help -a` lists the commands without opening a manual page.
+test('-h and --help end option parsing: git runs help with the rest', () => {
+  for (const option of ['-h', '--help']) {
+    const run = git(option, '-a');
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /git help <command>/, option);
+  }
+});
+
 test('git rejects an option it doesn\'t know, so denying one costs a real git call nothing', () => {
   for (const option of ['--future-opt', '--no-pag', '-pP', '-Cdir', '--shallow-file=x']) {
     assert.ok(unknown(git(option, 'version')), option);
@@ -71,4 +81,13 @@ test('the text rules check every commit after an unknown option', () => {
   const reason = decide({ tool_name: 'PowerShell', tool_input: { command: 'git --future-opt x commit -n -m y' } }, { home: '/home/dev' });
   assert.ok(reason);
   assert.equal(decide({ tool_name: 'PowerShell', tool_input: { command: 'git --no-pager commit -m y' } }, { home: '/home/dev' }), null);
+});
+
+// The factory plugin keeps its own copy of the lists (it ships without this folder), so the real-git
+// checks above cover it only while the copies match.
+test('the plugin lists the same git global options', () => {
+  assert.deepEqual([...plugin.GIT_OPTS_WITH_VALUE].sort(), [...GIT_OPTS_WITH_VALUE].sort());
+  assert.deepEqual([...plugin.GIT_FLAG_OPTS].sort(), [...GIT_FLAG_OPTS].sort());
+  assert.deepEqual([...plugin.GIT_ATTACHED_OPTS].sort(), [...GIT_ATTACHED_OPTS].sort());
+  assert.deepEqual(Object.keys(plugin.GIT_HELP_OPTS).sort(), [...GIT_HELP_OPTS].sort());
 });

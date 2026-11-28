@@ -54,6 +54,11 @@ export function check(change, context) {
   const blocked = why => `Blocked: ${why}. ${nextStep}`;
 
   for (const git of gitInvocations(change.command)) {
+    if (git.unknownOption) {
+      return blocked(`"${git.unknownOption}" isn't on the guard's list of git's global options, so it can't tell which git ` +
+        'subcommand runs. If git accepts it, the guard\'s list needs it added. The guard checks the word git wherever it ' +
+        'appears, so if this isn\'t a git call (grep -rn git --include=...), put the other program\'s options before the word git');
+    }
     const directory = path.resolve(change.cwd ?? '.', git.directory ?? '.');
     const reason = git.subcommand === 'push'
       ? checkPush(git.args, () => context.currentBranch(directory))
