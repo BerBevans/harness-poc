@@ -9,6 +9,13 @@ decisionTable({
   blocked: [
     ['rm after an escaped quote', bash(String.raw`x=\' rm Directory.Build.props 'y'`)],
     ['a redirect target quoted in part', bash('echo x > ".github/workflows/"ci.yml')],
+    // The bash parser's reading of write targets.
+    ['>| redirect', bash('echo x >| .editorconfig')],
+    ['>& redirect to a file', bash('echo x >& Directory.Build.props')],
+    ['&>> redirect', bash('dotnet build &>> Directory.Build.props')],
+    ['rm after a here-document whose prose has an apostrophe',
+      bash("cat > notes.md <<'EOF'\nthe docs' note\nEOF\nrm Directory.Build.props")],
+    ['rm inside bash -c after an apostrophe', bash(`bash -c "echo it's; rm global.json"`)],
     ['Edit of root .editorconfig', edit(inRepo('.editorconfig'), 'a', 'b')],
     ['Write of nested .editorconfig', write(inRepo('src\\Tasks\\.editorconfig'), 'root = true')],
     ['Write of a .globalconfig', write(inRepo('src\\relaxed.globalconfig'), 'is_global = true')],
@@ -63,6 +70,8 @@ decisionTable({
     ['dotnet tool install', bash('dotnet tool install dotnet-ef')],
   ],
   allowed: [
+    ['>& to a descriptor', bash('dotnet build >&2 2>&1 | tee build.log')],
+    ['>& to a log file', bash('dotnet build >& build.log')],
     ['Read of .editorconfig', read(inRepo('.editorconfig'))],
     ['cat of Directory.Build.props', bash('cat Directory.Build.props')],
     ['copying a guardrail elsewhere', bash('cp .editorconfig /tmp/editorconfig.copy')],
